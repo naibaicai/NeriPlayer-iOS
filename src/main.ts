@@ -20,20 +20,7 @@ import './styles/global.scss'
 initTheme()
 installNativeContextMenuPolicy()
 
-const windowKind = new URLSearchParams(window.location.search).get('window')
-
 async function mountWindow() {
-  if (windowKind === 'desktop-lyrics') {
-    const { default: DesktopLyricsView } = await import('./views/DesktopLyricsView.vue')
-    createApp(DesktopLyricsView).use(i18n).mount('#app')
-    return
-  }
-  if (windowKind === 'tray-popup') {
-    const { default: TrayPopupView } = await import('./views/TrayPopupView.vue')
-    createApp(TrayPopupView).use(i18n).mount('#app')
-    return
-  }
-
   const { default: App } = await import('./App.vue')
   const router = createRouter({
     history: createWebHistory(),
@@ -55,6 +42,7 @@ async function mountWindow() {
       { path: '/playlist/local/:id', name: 'local-playlist', meta: { section: 'library' }, component: () => import('./views/LocalPlaylistView.vue') },
       { path: '/library/local-artist/:name', name: 'local-artist', meta: { section: 'library' }, component: () => import('./views/LocalArtistView.vue') },
       { path: '/library/favorite/:id', name: 'favorite-playlist', meta: { section: 'library' }, component: () => import('./views/FavoritePlaylistView.vue') },
+      { path: '/comments', name: 'comments', meta: { section: 'home' }, component: () => import('./views/CommentsView.vue') },
       { path: '/debug', name: 'debug', meta: { section: 'debug' }, component: () => import('./views/DebugView.vue') },
     ],
   })

@@ -3,23 +3,40 @@
 // macOS 用 Command，Windows / Linux 用 Ctrl。三端统一走 primaryModifier()
 // 判断，避免各处散落 metaKey/ctrlKey 分支。
 
-export type DesktopPlatform = 'mac' | 'windows' | 'linux'
+export type DesktopPlatform = 'mac' | 'windows' | 'linux' | 'ios'
 
 function rawPlatform(): string {
   // 模块加载时就会调用；Node 20 等非浏览器环境没有全局 navigator
   if (typeof navigator === 'undefined') return ''
-  const data = (navigator as unknown as { userAgentData?: { platform?: string } }).userAgentData
-  return (data?.platform || navigator.platform || navigator.userAgent || '').toLowerCase()
+  return (navigator.userAgent || navigator.platform || '').toLowerCase()
+}
+
+/// iPadOS 13+ 的 UA 伪装成 macOS，靠触点数量区分：Mac 是 0
+function isIpadMasqueradingAsMac(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return /macintosh|mac os x/.test(navigator.userAgent.toLowerCase())
+    && (navigator.maxTouchPoints ?? 0) > 1
+}
+
+/// iOS 必须先于 macOS 判定：iPhone / iPad 的 UA 同时命中 mac 分支
+function isIosLike(value: string): boolean {
+  if (/iphone|ipad|ipod/.test(value)) return true
+  return isIpadMasqueradingAsMac()
 }
 
 export function detectPlatform(): DesktopPlatform {
   const value = rawPlatform()
-  if (/mac|iphone|ipad|darwin/.test(value)) return 'mac'
+  if (isIosLike(value)) return 'ios'
+  if (/mac|darwin/.test(value)) return 'mac'
   if (/win/.test(value)) return 'windows'
   return 'linux'
 }
 
+export const isIosPlatform = detectPlatform() === 'ios'
 export const isMacPlatform = detectPlatform() === 'mac'
+/// 触屏设备：没有窗口红绿灯、没有 hover、主修饰键不适用
+/// （当前只有 iOS 分支，其他平台全为 false，保留该名字是为了调用点语义清晰）
+export const isTouchPlatform = isIosPlatform
 
 /// 主修饰键是否按下：macOS 为 ⌘，其余为 Ctrl
 export function hasPrimaryModifier(event: KeyboardEvent): boolean {

@@ -4,32 +4,6 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { SUPPORTED_LOCALES, setLocaleWithTransition } from '@/i18n'
-import DesktopLyricsStage from '@/components/desktopLyrics/DesktopLyricsStage.vue'
-import { closeDesktopLyricsWindow, desktopLyricsOpen, openDesktopLyricsWindow } from '@/modules/desktopLyrics/bridge'
-import type { DesktopLyricsFrameLine } from '@/modules/desktopLyrics/frame'
-import {
-  DEFAULT_DESKTOP_LYRICS_STYLE,
-  DESKTOP_LYRICS_ALIGNS,
-  DESKTOP_LYRICS_BACKGROUND_OPACITY,
-  DESKTOP_LYRICS_BACKGROUNDS,
-  DESKTOP_LYRICS_FONT_PRESETS,
-  DESKTOP_LYRICS_FONT_SIZE,
-  DESKTOP_LYRICS_MAX_WIDTH,
-  DESKTOP_LYRICS_KARAOKE,
-  DESKTOP_LYRICS_LAYOUTS,
-  DESKTOP_LYRICS_LETTER_SPACING,
-  DESKTOP_LYRICS_OPACITY,
-  DESKTOP_LYRICS_SECONDARY,
-  DESKTOP_LYRICS_SECONDARY_SCALE,
-  DESKTOP_LYRICS_SHADOW_BLUR,
-  DESKTOP_LYRICS_STROKE_WIDTH,
-  DESKTOP_LYRICS_THEMES,
-  DESKTOP_LYRICS_WEIGHTS,
-  applyDesktopLyricsTheme,
-  normalizeDesktopLyricsStyle,
-  parseCssColor,
-  type DesktopLyricsStyle,
-} from '@/modules/desktopLyrics/style'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
@@ -80,16 +54,18 @@ import {
 } from '@/utils/storage'
 import { applyTheme, switchThemeWithRipple, type ThemeMode } from '@/utils/theme'
 import { THEME_COLORS, getSwatchColor, applyThemeColor, getSavedThemeColor, switchThemeColorWithRipple } from '@/utils/themeColor'
-import ShortcutSettings from '@/components/settings/ShortcutSettings.vue'
 import FontFamilyControl from '@/components/settings/FontFamilyControl.vue'
 import AudioEffectsSettings from '@/components/settings/AudioEffectsSettings.vue'
 import { SETTINGS_SEARCH_INDEX } from '@/modules/settings/searchIndex'
-import { isMacPlatform } from '@/modules/shortcuts/platform'
+import { isIosPlatform, isMacPlatform } from '@/modules/platform'
 import { filterAndRank, searchValue } from '@/modules/search/textMatcher'
 import { useEscapeClose } from '@/composables/useEscapeClose'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('settings-view')
+
+// iOS：无多窗口，桌面歌词（独立窗口）分区不可达
+const isIos = isIosPlatform
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -102,9 +78,9 @@ const lt = useListenTogetherStore()
 const toast = useToastStore()
 const {
   darkMode, themeColor: selectedColor, coverStyle, appFontFamily, lyricFontFamily,
-  defaultScreen, closeToTray, showMenuBarLyrics, showCoverBadge, showNowPlayingTitle, showToolbarDock,
+  defaultScreen, showCoverBadge, showNowPlayingTitle, showToolbarDock,
   showQualitySwitch, lyricFontScale,
-  normalizeVolume, multichannelDrc, volumeBalance, audioOutputDevice,
+  normalizeVolume, multichannelDrc, volumeBalance,
   fadeIn, fadeInDuration, fadeOutDuration,
   crossfadeNext, crossfadeInDuration, crossfadeOutDuration,
   keepProgress, rememberLongFormProgress, keepPlaybackMode,
@@ -113,7 +89,7 @@ const {
   coverBlurBg, coverBlurAmount, coverBlurDarken,
   neteaseQuality, youtubeQuality, biliQuality,
   youtubePlaybackSource, neteaseAutoSourceSwitch, neteaseLocalSourceFallback,
-  bypassProxy, internationalizationEnabled, exploreSearchHistoryEnabled,
+  internationalizationEnabled, exploreSearchHistoryEnabled,
   backgroundImageUri, backgroundImageBlur, backgroundImageAlpha, backgroundImageDim,
   enhancedAdvancedBlur, enhancedAdvancedBlurRadius,
   devModeEnabled, logToFile, logLevel,
@@ -169,42 +145,6 @@ function changeDefaultLyricSource(value: string) {
 function changeYouTubePlaybackSource(value: string) {
   const source = YOUTUBE_PLAYBACK_SOURCES.find(source => source === value)
   if (source) youtubePlaybackSource.value = source
-}
-
-const audioOutputDevices = ref<Array<{ name: string; isDefault: boolean }>>([])
-const audioOutputSwitching = ref(false)
-const audioOutputOptions = computed(() => {
-  const devices = audioOutputDevices.value.map(device => ({
-    value: device.name,
-    label: device.name,
-  }))
-  if (audioOutputDevice.value && !devices.some(device => device.value === audioOutputDevice.value)) {
-    devices.unshift({ value: audioOutputDevice.value, label: t('settings.audio_output_unavailable', { name: audioOutputDevice.value }) })
-  }
-  return [{ value: '', label: t('settings.audio_output_default') }, ...devices]
-})
-
-async function loadAudioOutputDevices() {
-  try {
-    audioOutputDevices.value = await invoke('list_audio_output_devices')
-  } catch (error) {
-    log.warn('failed to list audio output devices:', error)
-  }
-}
-
-async function changeAudioOutputDevice(selected: string) {
-  if (audioOutputSwitching.value || selected === audioOutputDevice.value) return
-  audioOutputSwitching.value = true
-  try {
-    await invoke('set_audio_output_device', { name: selected || null })
-    audioOutputDevice.value = selected
-  } catch (error) {
-    log.warn('failed to switch audio output:', error)
-    toast.error(t('settings.audio_output_failed'))
-  } finally {
-    audioOutputSwitching.value = false
-    void loadAudioOutputDevices()
-  }
 }
 
 async function openLogDir() {
@@ -283,7 +223,6 @@ const SECTION_COLLAPSE_KEYS: Partial<Record<SettingsSectionId, string[]>> = {
   quality: ['quality'],
   motion: ['effects'],
   lyrics: ['lyrics'],
-  desktop_lyrics: ['desktop_lyrics'],
   storage: ['storage'],
   backup: ['backup'],
   listen_together: ['listen_together'],
@@ -552,7 +491,6 @@ async function handleQualityChange(source: OnlineQualitySource, value: string) {
 type SettingsSectionId =
   | 'accounts'
   | 'general'
-  | 'shortcuts'
   | 'language'
   | 'playback'
   | 'audio'
@@ -564,19 +502,17 @@ type SettingsSectionId =
   | 'background'
   | 'motion'
   | 'lyrics'
-  | 'desktop_lyrics'
   | 'downloads'
   | 'storage'
-  | 'network'
   | 'backup'
   | 'listen_together'
   | 'about'
 
 const SETTINGS_UI_STATE_KEY = 'neri:settings-ui-state'
 const SETTINGS_SECTION_IDS: SettingsSectionId[] = [
-  'accounts', 'general', 'shortcuts', 'language', 'playback', 'audio', 'audio_effects', 'quality', 'playback_sources',
-  'appearance', 'now_playing', 'background', 'motion', 'lyrics', 'desktop_lyrics',
-  'downloads', 'storage', 'network', 'backup', 'listen_together', 'about',
+  'accounts', 'general', 'language', 'playback', 'audio', 'audio_effects', 'quality', 'playback_sources',
+  'appearance', 'now_playing', 'background', 'motion', 'lyrics',
+  'downloads', 'storage', 'backup', 'listen_together', 'about',
 ]
 
 type SettingsUiState = {
@@ -655,16 +591,16 @@ interface SettingsNavItem {
   icon: string
 }
 
-const settingsNavGroups = computed<{ items: SettingsNavItem[] }[]>(() => [
-  {
-    items: [
+const settingsNavGroups = computed<{ items: SettingsNavItem[] }[]>(() => {
+  // 字面量需要显式标注，否则 map 后 id 会被推断成 string，丢掉 SettingsSectionId 约束
+  const groups: { items: SettingsNavItem[] }[] = [
+  {    items: [
       { id: 'accounts', label: t('settings.accounts'), description: t('settings.nav_accounts_desc'), icon: 'account_circle' },
     ],
   },
   {
     items: [
       { id: 'general', label: t('settings.general'), description: t('settings.nav_general_desc'), icon: 'settings' },
-      { id: 'shortcuts', label: t('shortcuts.title'), description: t('settings.nav_shortcuts_desc'), icon: 'keyboard' },
       { id: 'language', label: t('settings.language'), description: t('settings.language_desc'), icon: 'translate' },
     ],
   },
@@ -688,14 +624,12 @@ const settingsNavGroups = computed<{ items: SettingsNavItem[] }[]>(() => [
   {
     items: [
       { id: 'lyrics', label: t('settings.lyrics'), description: t('settings.nav_lyrics_desc'), icon: 'lyrics' },
-      { id: 'desktop_lyrics', label: t('desktop_lyrics.title'), description: t('settings.nav_desktop_lyrics_desc'), icon: 'subtitles' },
     ],
   },
   {
     items: [
       { id: 'downloads', label: t('settings.downloads_section'), description: t('settings.nav_downloads_desc'), icon: 'download' },
       { id: 'storage', label: t('settings.storage'), description: t('settings.nav_storage_desc'), icon: 'storage' },
-      { id: 'network', label: t('settings.network'), description: t('settings.nav_network_desc'), icon: 'router' },
     ],
   },
   {
@@ -709,7 +643,9 @@ const settingsNavGroups = computed<{ items: SettingsNavItem[] }[]>(() => [
       { id: 'about', label: t('settings.about'), description: t('settings.about_desc'), icon: 'info' },
     ],
   },
-])
+  ]
+  return groups
+})
 
 const activeSettingsItem = computed(() => settingsNavGroups.value
   .flatMap(group => group.items)
@@ -723,7 +659,6 @@ function selectSettingsSection(id: SettingsSectionId) {
     const defaults: Record<SettingsSectionId, string[]> = {
       accounts: [],
       general: [],
-      shortcuts: [],
       language: [],
       playback: ['playback'],
       audio: [],
@@ -735,10 +670,8 @@ function selectSettingsSection(id: SettingsSectionId) {
       background: [],
       motion: ['effects'],
       lyrics: ['lyrics'],
-      desktop_lyrics: ['desktop_lyrics'],
       downloads: [],
       storage: ['storage'],
-      network: [],
       backup: ['backup'],
       listen_together: ['listen_together'],
       about: [],
@@ -750,19 +683,13 @@ function selectSettingsSection(id: SettingsSectionId) {
   // 滚动位置恢复改由面板过渡的 onPanelEnter 钩子触发（等新面板插入布局后再恢复）
 }
 
-// 其它地方（桌面歌词工具栏的「设置」）用 ?section=lyrics&focus=desktop-lyrics 直接打开某个分区
+// 外部用 ?section=<id> 直接打开某个设置分区
 const route = useRoute()
 function applyRouteSection() {
   const section = String(route.query.section || '')
   if (!SETTINGS_SECTION_IDS.includes(section as SettingsSectionId)) return
   selectSettingsSection(section as SettingsSectionId)
   const focus = String(route.query.focus || '')
-  if (focus === 'desktop-lyrics') {
-    expandedSections.value = new Set([...expandedSections.value, 'desktop_lyrics'])
-    void nextTick(() => {
-      setTimeout(() => document.getElementById('settings-desktop-lyrics')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 260)
-    })
-  }
 }
 watch(() => [route.query.section, route.query.focus], applyRouteSection)
 
@@ -776,9 +703,7 @@ onMounted(() => {
   loadBuildInfo()
   // 加载默认下载目录
   loadDefaultDownloadDir()
-  void loadAudioOutputDevices()
   void restoreSettingsScrollPosition(activeSettingsSection.value)
-  refreshDesktopLyricsAccent()
   applyRouteSection()
 })
 
@@ -788,19 +713,6 @@ onBeforeUnmount(() => {
   // 开发者模式 7-tap 计时器兜底清理
   if (tapTimer) clearTimeout(tapTimer)
 })
-
-// 网络：绕过代理
-async function handleBypassProxyChange(val: boolean) {
-  const previous = bypassProxy.value
-  bypassProxy.value = val
-  try {
-    await invoke('set_bypass_proxy', { bypass: val })
-  } catch (e) {
-    log.error('Failed to set bypass proxy:', e)
-    bypassProxy.value = previous
-    toast.error(t('settings.bypass_proxy_failed'))
-  }
-}
 
 // 一起听
 const showResetLtIdentityConfirm = ref(false)
@@ -1153,93 +1065,6 @@ function resetLyricOffsets() {
   for (const item of lyricOffsetSettings) settings[item.key] = item.defaultMs
 }
 
-// ---- 桌面歌词 ----
-const desktopLyricsStyle = computed(() => settings.desktopLyrics)
-
-function updateDesktopLyrics(patch: Partial<DesktopLyricsStyle>) {
-  settings.desktopLyrics = normalizeDesktopLyricsStyle({ ...settings.desktopLyrics, ...patch })
-}
-
-/** 改任一颜色就变成自定义配色 */
-function setDesktopLyricsGradient(key: 'playedColors' | 'unplayedColors', index: 0 | 1, value: string) {
-  const colors = [...desktopLyricsStyle.value[key]] as [string, string]
-  colors[index] = value
-  updateDesktopLyrics({ [key]: colors, theme: 'custom' })
-}
-
-function chooseDesktopLyricsTheme(id: string) {
-  settings.desktopLyrics = applyDesktopLyricsTheme(desktopLyricsStyle.value, id)
-}
-
-function resetDesktopLyrics() {
-  const { bounds, locked } = desktopLyricsStyle.value
-  settings.desktopLyrics = normalizeDesktopLyricsStyle({ ...DEFAULT_DESKTOP_LYRICS_STYLE, bounds, locked })
-}
-
-const desktopLyricsBusy = ref(false)
-async function toggleDesktopLyrics(open: boolean) {
-  if (desktopLyricsBusy.value) return
-  desktopLyricsBusy.value = true
-  try {
-    if (open) await openDesktopLyricsWindow()
-    else await closeDesktopLyricsWindow()
-  } catch (error) {
-    log.error('Desktop lyrics toggle failed:', error)
-    toast.error(t('desktop_lyrics.open_failed'))
-  } finally {
-    desktopLyricsBusy.value = false
-  }
-}
-
-const CUSTOM_FONT = '__custom__'
-const desktopLyricsCustomFont = ref(false)
-const desktopLyricsFontOptions = computed(() => [
-  { value: '', label: t('desktop_lyrics.font_default') },
-  ...DESKTOP_LYRICS_FONT_PRESETS.map(font => ({ value: font, label: font })),
-  { value: CUSTOM_FONT, label: t('desktop_lyrics.font_custom') },
-])
-const desktopLyricsFontChoice = computed(() => {
-  const family = desktopLyricsStyle.value.fontFamily
-  if (desktopLyricsCustomFont.value) return CUSTOM_FONT
-  return !family || (DESKTOP_LYRICS_FONT_PRESETS as readonly string[]).includes(family) ? family : CUSTOM_FONT
-})
-function chooseDesktopLyricsFont(value: string) {
-  desktopLyricsCustomFont.value = value === CUSTOM_FONT
-  if (value !== CUSTOM_FONT) updateDesktopLyrics({ fontFamily: value })
-}
-const desktopLyricsWeightOptions = computed(() => DESKTOP_LYRICS_WEIGHTS.map(weight => ({ value: String(weight), label: String(weight) })))
-const desktopLyricsSecondaryOptions = computed(() => DESKTOP_LYRICS_SECONDARY.map(value => ({
-  value, label: t(`desktop_lyrics.secondary_${value}`),
-})))
-
-function themeSwatch(id: string): string {
-  if (id === 'accent') {
-    const accent = desktopLyricsAccent.value || '#d0bcff'
-    return `linear-gradient(135deg, #ffffff, ${accent})`
-  }
-  const theme = DESKTOP_LYRICS_THEMES.find(candidate => candidate.id === id)
-  return theme ? `linear-gradient(135deg, ${theme.played[0]}, ${theme.played[1]})` : 'transparent'
-}
-
-// 预览：两句示例歌词循环播放，第一句逐字
-const PREVIEW_LOOP_MS = 7_600
-const desktopLyricsAccent = ref<string | null>(null)
-const desktopLyricsPreviewLines = computed<DesktopLyricsFrameLine[]>(() => {
-  const characters = Array.from(t('desktop_lyrics.preview_line'))
-  const step = Math.max(120, Math.floor(3_000 / Math.max(1, characters.length)))
-  const words = characters.map((text, index) => ({ startMs: 400 + index * step, durationMs: step, text }))
-  const firstEnd = 400 + characters.length * step
-  return [
-    { startMs: 400, durationMs: firstEnd - 400, text: characters.join(''), translation: t('desktop_lyrics.preview_translation'), roman: 'desktop lyrics preview', words },
-    { startMs: firstEnd + 300, durationMs: 3_000, text: t('desktop_lyrics.preview_next'), translation: '', roman: '', words: [] },
-  ]
-})
-function desktopLyricsPreviewClock(): number {
-  return performance.now() % PREVIEW_LOOP_MS
-}
-function refreshDesktopLyricsAccent() {
-  desktopLyricsAccent.value = parseCssColor(getComputedStyle(document.documentElement).getPropertyValue('--md-primary'))
-}
 
 const volumeBalanceLabel = computed(() => {
   const percent = Math.round(Math.abs(volumeBalance.value) * 100)
@@ -1248,14 +1073,6 @@ const volumeBalanceLabel = computed(() => {
 })
 
 const PROJECT_REPOSITORY_URL = 'https://github.com/cwuom/NeriPlayer-Desktop'
-const FFMPEG_LEGAL_URL = 'https://ffmpeg.org/legal.html'
-// 随包的 FFmpeg 是否加载成功、加载的是哪个版本；没加载上时说明哪些格式受影响
-const ffmpegComponentText = computed(() => {
-  const capabilities = player.decoderCapabilities
-  if (capabilities?.ffmpeg) return t('settings.ffmpeg_component_loaded', { version: capabilities.ffmpeg.avcodec })
-  return t('settings.ffmpeg_component_unavailable')
-})
-
 function openGitHubSetup() {
   githubPhase.value = 1
   githubToken.value = ''
@@ -1550,14 +1367,6 @@ useEscapeClose(
           <button v-for="o in defaultScreenOptions" :key="o.value" class="m3-chip" :class="{ active: defaultScreen === o.value }" @click="defaultScreen = o.value as any">{{ o.label }}</button>
         </div>
       </div>
-      <div class="setting-card">
-        <div class="setting-icon-wrap"><span class="material-symbols-rounded">tab_inactive</span></div>
-        <div class="setting-info">
-          <div class="setting-title">{{ t('settings.close_to_tray') }}</div>
-          <div class="setting-desc">{{ t('settings.close_to_tray_desc') }}</div>
-        </div>
-        <label class="m3-switch"><input type="checkbox" v-model="closeToTray" /><span class="track"><span class="thumb"><span v-if="closeToTray" class="material-symbols-rounded" style="font-size: 14px">check</span></span></span></label>
-      </div>
 
     <!-- YouTube 国际化 -->
     <div class="setting-card">
@@ -1842,22 +1651,9 @@ useEscapeClose(
         </div>
 
     <!-- 快捷键 -->
-        <div v-show="activeSettingsSection === 'shortcuts'" class="settings-section-panel" data-section="shortcuts">
-          <ShortcutSettings />
-        </div>
 
     <!-- 播放 -->
         <div v-show="activeSettingsSection === 'audio'" class="settings-section-panel" data-section="audio">
-    <div class="setting-card setting-card--select">
-      <div class="setting-icon-wrap"><span class="material-symbols-rounded">speaker</span></div>
-      <div class="setting-info">
-        <label class="setting-title" for="audio-output-device">{{ t('settings.audio_output') }}</label>
-        <div class="setting-desc">{{ t('settings.audio_output_desc') }}</div>
-      </div>
-      <CustomSelect id="audio-output-device" class="settings-select settings-select--device"
-        :model-value="audioOutputDevice" :options="audioOutputOptions" :label="t('settings.audio_output')"
-        :disabled="audioOutputSwitching" @open="loadAudioOutputDevices" @update:model-value="changeAudioOutputDevice" />
-    </div>
     <div class="setting-card">
       <div class="setting-icon-wrap"><span class="material-symbols-rounded">graphic_eq</span></div>
       <div class="setting-info">
@@ -2024,26 +1820,6 @@ useEscapeClose(
         <label class="m3-switch"><input type="checkbox" v-model="keepPlaybackMode" /><span class="track"><span class="thumb"><span v-if="keepPlaybackMode" class="material-symbols-rounded" style="font-size: 14px">check</span></span></span></label>
       </div>
     </div></Transition>
-        </div>
-
-    <!-- 网络 -->
-        <div v-show="activeSettingsSection === 'network'" class="settings-section-panel" data-section="network">
-    <div class="section-label">
-      <span class="material-symbols-rounded" style="font-size: 18px">wifi</span>
-      <span>{{ t('settings.network') }}</span>
-    </div>
-
-    <div class="setting-card">
-      <div class="setting-icon-wrap"><span class="material-symbols-rounded">vpn_lock</span></div>
-      <div class="setting-info">
-        <div class="setting-title">{{ t('settings.bypass_proxy') }}</div>
-        <div class="setting-desc">{{ t('settings.bypass_proxy_desc') }}</div>
-      </div>
-      <label class="m3-switch">
-        <input type="checkbox" :checked="bypassProxy" @change="handleBypassProxyChange(($event.target as HTMLInputElement).checked)" />
-        <span class="track"><span class="thumb"><span v-if="bypassProxy" class="material-symbols-rounded" style="font-size: 14px">check</span></span></span>
-      </label>
-    </div>
         </div>
 
     <!-- 一起听 -->
@@ -2455,258 +2231,6 @@ useEscapeClose(
         </div>
 
     <!-- 桌面歌词 -->
-        <div v-show="activeSettingsSection === 'desktop_lyrics'" class="settings-section-panel" data-section="desktop_lyrics">
-    <div id="settings-desktop-lyrics" class="section-label clickable" @click="toggleSection('desktop_lyrics')">
-      <span class="material-symbols-rounded" style="font-size: 18px">subtitles</span>
-      <span>{{ t('desktop_lyrics.title') }}</span>
-      <span class="material-symbols-rounded section-arrow" :class="{ expanded: isExpanded('desktop_lyrics') }">expand_more</span>
-    </div>
-
-    <div class="setting-card">
-      <div class="setting-icon-wrap"><span class="material-symbols-rounded">desktop_windows</span></div>
-      <div class="setting-info">
-        <div class="setting-title">{{ t('desktop_lyrics.open') }}</div>
-        <div class="setting-desc">{{ t('desktop_lyrics.open_desc') }}</div>
-      </div>
-      <button
-        v-if="desktopLyricsOpen"
-        class="m3-chip sm"
-        :class="{ active: desktopLyricsStyle.locked }"
-        @click="updateDesktopLyrics({ locked: !desktopLyricsStyle.locked })"
-      >
-        {{ t(desktopLyricsStyle.locked ? 'desktop_lyrics.unlock' : 'desktop_lyrics.lock') }}
-      </button>
-      <label class="m3-switch"><input type="checkbox" :checked="desktopLyricsOpen" :disabled="desktopLyricsBusy" @change="toggleDesktopLyrics(($event.target as HTMLInputElement).checked)" /><span class="track"><span class="thumb"><span v-if="desktopLyricsOpen" class="material-symbols-rounded" style="font-size: 14px">check</span></span></span></label>
-    </div>
-
-    <div v-if="isMacPlatform" class="setting-card">
-      <div class="setting-icon-wrap"><span class="material-symbols-rounded">lyrics</span></div>
-      <div class="setting-info">
-        <div class="setting-title">{{ t('desktop_lyrics.menu_bar') }}</div>
-        <div class="setting-desc">{{ t('desktop_lyrics.menu_bar_desc') }}</div>
-      </div>
-      <label class="m3-switch"><input type="checkbox" v-model="showMenuBarLyrics" :aria-label="t('desktop_lyrics.menu_bar')" /><span class="track"><span class="thumb"><span v-if="showMenuBarLyrics" class="material-symbols-rounded" style="font-size: 14px">check</span></span></span></label>
-    </div>
-
-    <Transition @enter="onExpandEnter" @after-enter="onExpandAfterEnter" @leave="onExpandLeave" @after-leave="onExpandAfterLeave"><div v-if="isExpanded('desktop_lyrics')">
-      <div class="setting-card dl-preview-card">
-        <div class="dl-preview" :aria-label="t('desktop_lyrics.preview')">
-          <DesktopLyricsStage
-            :lines="desktopLyricsPreviewLines"
-            :first-index="0"
-            :clock="desktopLyricsPreviewClock"
-            :style="desktopLyricsStyle"
-            :accent="desktopLyricsAccent"
-            :placeholder="t('desktop_lyrics.preview')"
-          />
-        </div>
-      </div>
-
-      <div class="setting-card dl-stack-card">
-        <div class="setting-title">{{ t('desktop_lyrics.theme') }}</div>
-        <div class="dl-swatches">
-          <button
-            v-for="theme in [...DESKTOP_LYRICS_THEMES.map(item => item.id), 'accent']"
-            :key="theme"
-            class="dl-swatch"
-            :class="{ active: desktopLyricsStyle.theme === theme }"
-            :title="t(`desktop_lyrics.theme_${theme}`)"
-            @click="chooseDesktopLyricsTheme(theme)"
-          >
-            <span class="dl-swatch-dot" :style="{ background: themeSwatch(theme) }"></span>
-            <span>{{ t(`desktop_lyrics.theme_${theme}`) }}</span>
-          </button>
-          <span v-if="desktopLyricsStyle.theme === 'custom'" class="m3-chip sm active">{{ t('desktop_lyrics.theme_custom') }}</span>
-        </div>
-      </div>
-
-      <div class="setting-card dl-stack-card">
-        <div class="setting-title">{{ t('desktop_lyrics.layout') }}</div>
-        <div class="dl-chips">
-          <button v-for="layout in DESKTOP_LYRICS_LAYOUTS" :key="layout" class="m3-chip sm" :class="{ active: desktopLyricsStyle.layout === layout }" @click="updateDesktopLyrics({ layout })">
-            {{ t(`desktop_lyrics.layout_${layout}`) }}
-          </button>
-        </div>
-        <div v-if="desktopLyricsStyle.layout === 'double'" class="setting-desc">{{ t('desktop_lyrics.layout_double_desc') }}</div>
-      </div>
-
-      <div class="setting-card dl-stack-card">
-        <div class="setting-title">{{ t('desktop_lyrics.align') }}</div>
-        <div class="dl-chips">
-          <button v-for="align in DESKTOP_LYRICS_ALIGNS" :key="align" class="m3-chip sm" :class="{ active: desktopLyricsStyle.align === align }" @click="updateDesktopLyrics({ align })">
-            {{ t(`desktop_lyrics.align_${align}`) }}
-          </button>
-        </div>
-      </div>
-
-      <div class="setting-card dl-stack-card">
-        <div class="setting-title">{{ t('desktop_lyrics.karaoke') }}</div>
-        <div class="dl-chips">
-          <button v-for="mode in DESKTOP_LYRICS_KARAOKE" :key="mode" class="m3-chip sm" :class="{ active: desktopLyricsStyle.karaoke === mode }" @click="updateDesktopLyrics({ karaoke: mode })">
-            {{ t(`desktop_lyrics.karaoke_${mode}`) }}
-          </button>
-        </div>
-      </div>
-
-      <div class="setting-card setting-card--select">
-        <div class="setting-info"><div class="setting-title">{{ t('desktop_lyrics.secondary') }}</div></div>
-        <CustomSelect class="settings-select" :model-value="desktopLyricsStyle.secondary" :options="desktopLyricsSecondaryOptions"
-          :label="t('desktop_lyrics.secondary')" :disabled="desktopLyricsStyle.layout === 'double'"
-          @update:model-value="updateDesktopLyrics({ secondary: $event as DesktopLyricsStyle['secondary'] })" />
-      </div>
-
-      <div class="setting-card setting-card--select">
-        <div class="setting-info"><div class="setting-title">{{ t('desktop_lyrics.font') }}</div></div>
-        <CustomSelect class="settings-select" :model-value="desktopLyricsFontChoice" :options="desktopLyricsFontOptions"
-          :label="t('desktop_lyrics.font')" @update:model-value="chooseDesktopLyricsFont" />
-      </div>
-      <div v-if="desktopLyricsFontChoice === CUSTOM_FONT" class="setting-card sub-card">
-        <input
-          class="lt-url-input lt-input-left dl-font-input"
-          :value="desktopLyricsStyle.fontFamily"
-          :placeholder="t('desktop_lyrics.font_custom_placeholder')"
-          maxlength="64"
-          @change="updateDesktopLyrics({ fontFamily: ($event.target as HTMLInputElement).value })"
-        />
-      </div>
-
-      <div class="setting-card sub-card">
-        <div class="setting-info">
-          <div class="setting-title">{{ t('desktop_lyrics.font_size') }}</div>
-          <div class="setting-desc">{{ desktopLyricsStyle.fontSize }}px</div>
-        </div>
-        <input type="range" class="m3-slider" :value="desktopLyricsStyle.fontSize" :min="DESKTOP_LYRICS_FONT_SIZE.min" :max="DESKTOP_LYRICS_FONT_SIZE.max" :step="DESKTOP_LYRICS_FONT_SIZE.step"
-          :aria-label="t('desktop_lyrics.font_size')" @input="updateDesktopLyrics({ fontSize: Number(($event.target as HTMLInputElement).value) })" />
-      </div>
-
-      <div class="setting-card sub-card">
-        <div class="setting-info">
-          <div class="setting-title">{{ t('desktop_lyrics.max_width') }}</div>
-          <div class="setting-desc">{{ desktopLyricsStyle.maxWidth }}px · {{ t('desktop_lyrics.max_width_desc') }}</div>
-        </div>
-        <input type="range" class="m3-slider" :value="desktopLyricsStyle.maxWidth" :min="DESKTOP_LYRICS_MAX_WIDTH.min" :max="DESKTOP_LYRICS_MAX_WIDTH.max" :step="DESKTOP_LYRICS_MAX_WIDTH.step"
-          :aria-label="t('desktop_lyrics.max_width')" @input="updateDesktopLyrics({ maxWidth: Number(($event.target as HTMLInputElement).value) })" />
-      </div>
-
-      <div class="setting-card setting-card--select sub-card">
-        <div class="setting-info"><div class="setting-title">{{ t('desktop_lyrics.font_weight') }}</div></div>
-        <CustomSelect class="settings-select" :model-value="String(desktopLyricsStyle.fontWeight)" :options="desktopLyricsWeightOptions"
-          :label="t('desktop_lyrics.font_weight')" @update:model-value="updateDesktopLyrics({ fontWeight: Number($event) })" />
-      </div>
-
-      <div class="setting-card sub-card">
-        <div class="setting-info">
-          <div class="setting-title">{{ t('desktop_lyrics.letter_spacing') }}</div>
-          <div class="setting-desc">{{ desktopLyricsStyle.letterSpacing }}px</div>
-        </div>
-        <input type="range" class="m3-slider" :value="desktopLyricsStyle.letterSpacing" :min="DESKTOP_LYRICS_LETTER_SPACING.min" :max="DESKTOP_LYRICS_LETTER_SPACING.max" :step="DESKTOP_LYRICS_LETTER_SPACING.step"
-          :aria-label="t('desktop_lyrics.letter_spacing')" @input="updateDesktopLyrics({ letterSpacing: Number(($event.target as HTMLInputElement).value) })" />
-      </div>
-
-      <div class="setting-card sub-card">
-        <div class="setting-info">
-          <div class="setting-title">{{ t('desktop_lyrics.secondary_size') }}</div>
-          <div class="setting-desc">{{ Math.round(desktopLyricsStyle.secondaryScale * 100) }}%</div>
-        </div>
-        <input type="range" class="m3-slider" :value="desktopLyricsStyle.secondaryScale" :min="DESKTOP_LYRICS_SECONDARY_SCALE.min" :max="DESKTOP_LYRICS_SECONDARY_SCALE.max" :step="DESKTOP_LYRICS_SECONDARY_SCALE.step"
-          :aria-label="t('desktop_lyrics.secondary_size')" @input="updateDesktopLyrics({ secondaryScale: Number(($event.target as HTMLInputElement).value) })" />
-      </div>
-
-      <div class="setting-card dl-stack-card">
-        <div class="setting-desc">{{ t('desktop_lyrics.gradient_hint') }}</div>
-        <div class="dl-color-rows">
-          <label class="dl-color-row">
-            <span>{{ t('desktop_lyrics.played') }}</span>
-            <input type="color" :value="desktopLyricsStyle.playedColors[0]" @input="setDesktopLyricsGradient('playedColors', 0, ($event.target as HTMLInputElement).value)" />
-            <input type="color" :value="desktopLyricsStyle.playedColors[1]" @input="setDesktopLyricsGradient('playedColors', 1, ($event.target as HTMLInputElement).value)" />
-          </label>
-          <label class="dl-color-row">
-            <span>{{ t('desktop_lyrics.unplayed') }}</span>
-            <input type="color" :value="desktopLyricsStyle.unplayedColors[0]" @input="setDesktopLyricsGradient('unplayedColors', 0, ($event.target as HTMLInputElement).value)" />
-            <input type="color" :value="desktopLyricsStyle.unplayedColors[1]" @input="setDesktopLyricsGradient('unplayedColors', 1, ($event.target as HTMLInputElement).value)" />
-          </label>
-          <label class="dl-color-row">
-            <span>{{ t('desktop_lyrics.secondary_color') }}</span>
-            <input type="color" :value="desktopLyricsStyle.secondaryColor" @input="updateDesktopLyrics({ secondaryColor: ($event.target as HTMLInputElement).value, theme: 'custom' })" />
-          </label>
-        </div>
-      </div>
-
-      <div class="setting-card">
-        <div class="setting-info"><div class="setting-title">{{ t('desktop_lyrics.stroke') }}</div></div>
-        <input v-if="desktopLyricsStyle.strokeEnabled" type="color" class="dl-color-inline" :value="desktopLyricsStyle.strokeColor" :aria-label="t('desktop_lyrics.stroke')"
-          @input="updateDesktopLyrics({ strokeColor: ($event.target as HTMLInputElement).value })" />
-        <label class="m3-switch"><input type="checkbox" :checked="desktopLyricsStyle.strokeEnabled" @change="updateDesktopLyrics({ strokeEnabled: ($event.target as HTMLInputElement).checked })" /><span class="track"><span class="thumb"><span v-if="desktopLyricsStyle.strokeEnabled" class="material-symbols-rounded" style="font-size: 14px">check</span></span></span></label>
-      </div>
-      <div v-if="desktopLyricsStyle.strokeEnabled" class="setting-card sub-card">
-        <div class="setting-info">
-          <div class="setting-title">{{ t('desktop_lyrics.stroke_width') }}</div>
-          <div class="setting-desc">{{ desktopLyricsStyle.strokeWidth }}px</div>
-        </div>
-        <input type="range" class="m3-slider" :value="desktopLyricsStyle.strokeWidth" :min="DESKTOP_LYRICS_STROKE_WIDTH.min" :max="DESKTOP_LYRICS_STROKE_WIDTH.max" :step="DESKTOP_LYRICS_STROKE_WIDTH.step"
-          :aria-label="t('desktop_lyrics.stroke_width')" @input="updateDesktopLyrics({ strokeWidth: Number(($event.target as HTMLInputElement).value) })" />
-      </div>
-
-      <div class="setting-card">
-        <div class="setting-info"><div class="setting-title">{{ t('desktop_lyrics.shadow') }}</div></div>
-        <input v-if="desktopLyricsStyle.shadowEnabled" type="color" class="dl-color-inline" :value="desktopLyricsStyle.shadowColor" :aria-label="t('desktop_lyrics.shadow')"
-          @input="updateDesktopLyrics({ shadowColor: ($event.target as HTMLInputElement).value })" />
-        <label class="m3-switch"><input type="checkbox" :checked="desktopLyricsStyle.shadowEnabled" @change="updateDesktopLyrics({ shadowEnabled: ($event.target as HTMLInputElement).checked })" /><span class="track"><span class="thumb"><span v-if="desktopLyricsStyle.shadowEnabled" class="material-symbols-rounded" style="font-size: 14px">check</span></span></span></label>
-      </div>
-      <div v-if="desktopLyricsStyle.shadowEnabled" class="setting-card sub-card">
-        <div class="setting-info">
-          <div class="setting-title">{{ t('desktop_lyrics.shadow_blur') }}</div>
-          <div class="setting-desc">{{ desktopLyricsStyle.shadowBlur }}px</div>
-        </div>
-        <input type="range" class="m3-slider" :value="desktopLyricsStyle.shadowBlur" :min="DESKTOP_LYRICS_SHADOW_BLUR.min" :max="DESKTOP_LYRICS_SHADOW_BLUR.max" :step="DESKTOP_LYRICS_SHADOW_BLUR.step"
-          :aria-label="t('desktop_lyrics.shadow_blur')" @input="updateDesktopLyrics({ shadowBlur: Number(($event.target as HTMLInputElement).value) })" />
-      </div>
-
-      <div class="setting-card">
-        <div class="setting-info"><div class="setting-title">{{ t('desktop_lyrics.glow') }}</div></div>
-        <label class="m3-switch"><input type="checkbox" :checked="desktopLyricsStyle.glowEnabled" @change="updateDesktopLyrics({ glowEnabled: ($event.target as HTMLInputElement).checked })" /><span class="track"><span class="thumb"><span v-if="desktopLyricsStyle.glowEnabled" class="material-symbols-rounded" style="font-size: 14px">check</span></span></span></label>
-      </div>
-
-      <div class="setting-card">
-        <div class="setting-info">
-          <div class="setting-title">{{ t('desktop_lyrics.opacity') }}</div>
-          <div class="setting-desc">{{ Math.round(desktopLyricsStyle.opacity * 100) }}%</div>
-        </div>
-        <input type="range" class="m3-slider" :value="desktopLyricsStyle.opacity" :min="DESKTOP_LYRICS_OPACITY.min" :max="DESKTOP_LYRICS_OPACITY.max" :step="DESKTOP_LYRICS_OPACITY.step"
-          :aria-label="t('desktop_lyrics.opacity')" @input="updateDesktopLyrics({ opacity: Number(($event.target as HTMLInputElement).value) })" />
-      </div>
-
-      <div class="setting-card dl-stack-card">
-        <div class="setting-title">{{ t('desktop_lyrics.background') }}</div>
-        <div class="dl-chips">
-          <button v-for="mode in DESKTOP_LYRICS_BACKGROUNDS" :key="mode" class="m3-chip sm" :class="{ active: desktopLyricsStyle.background === mode }" @click="updateDesktopLyrics({ background: mode })">
-            {{ t(`desktop_lyrics.background_${mode}`) }}
-          </button>
-        </div>
-      </div>
-      <div v-if="desktopLyricsStyle.background !== 'never'" class="setting-card sub-card">
-        <div class="setting-info">
-          <div class="setting-title">{{ t('desktop_lyrics.background_opacity') }}</div>
-          <div class="setting-desc">{{ Math.round(desktopLyricsStyle.backgroundOpacity * 100) }}%</div>
-        </div>
-        <input type="range" class="m3-slider" :value="desktopLyricsStyle.backgroundOpacity" :min="DESKTOP_LYRICS_BACKGROUND_OPACITY.min" :max="DESKTOP_LYRICS_BACKGROUND_OPACITY.max" :step="DESKTOP_LYRICS_BACKGROUND_OPACITY.step"
-          :aria-label="t('desktop_lyrics.background_opacity')" @input="updateDesktopLyrics({ backgroundOpacity: Number(($event.target as HTMLInputElement).value) })" />
-      </div>
-
-      <div class="setting-card">
-        <div class="setting-info"><div class="setting-title">{{ t('desktop_lyrics.show_track_info') }}</div></div>
-        <label class="m3-switch"><input type="checkbox" :checked="desktopLyricsStyle.showTrackInfo" @change="updateDesktopLyrics({ showTrackInfo: ($event.target as HTMLInputElement).checked })" /><span class="track"><span class="thumb"><span v-if="desktopLyricsStyle.showTrackInfo" class="material-symbols-rounded" style="font-size: 14px">check</span></span></span></label>
-      </div>
-
-      <div class="setting-card sub-card">
-        <div class="setting-info">
-          <div class="setting-title">{{ t('desktop_lyrics.reset') }}</div>
-          <div class="setting-desc">{{ t('desktop_lyrics.reset_desc') }}</div>
-        </div>
-        <button class="m3-chip sm" @click="resetDesktopLyrics">{{ t('desktop_lyrics.reset') }}</button>
-      </div>
-    </div></Transition>
-        </div>
 
     <!-- 动效 & 视觉 -->
         <div v-show="activeSettingsSection === 'motion'" class="settings-section-panel" data-section="motion">
@@ -3202,19 +2726,6 @@ useEscapeClose(
       </div>
       <span class="material-symbols-rounded" style="font-size: 20px; opacity: 0.3">open_in_new</span>
     </div>
-    <div
-      class="setting-card"
-      style="cursor: pointer"
-      :title="player.decoderCapabilities?.ffmpegError ?? player.decoderCapabilities?.ffmpeg?.directory ?? ''"
-      @click="openExternalUrl(FFMPEG_LEGAL_URL)"
-    >
-      <div class="setting-icon-wrap"><span class="material-symbols-rounded">graphic_eq</span></div>
-      <div class="setting-info">
-        <div class="setting-title">{{ t('settings.ffmpeg_component') }}</div>
-        <div class="setting-desc">{{ ffmpegComponentText }}</div>
-      </div>
-      <span class="material-symbols-rounded" style="font-size: 20px; opacity: 0.3">open_in_new</span>
-    </div>
         </div>
 
         </div>
@@ -3499,7 +3010,7 @@ useEscapeClose(
   /* 顶部总留白（标题栏 + 本内边距）恒定 64px：
      原 28px 是按 36px 标题栏调的，macOS 标题栏加高到 52px 后
      继续写死会叠加出双重留白，这里随 --titlebar-height 自动收窄 */
-  padding: max(8px, calc(64px - var(--titlebar-height, 36px))) clamp(24px, 4vw, 64px) 0;
+  padding: var(--settings-pad-top, max(8px, calc(64px - var(--titlebar-height, 36px)))) clamp(24px, 4vw, 64px) 0;
 }
 
 .settings-layout {
@@ -4076,7 +3587,12 @@ useEscapeClose(
   }
 }
 
-.setting-info { flex: 1; min-width: 0; }
+.setting-info { flex: 1 1 0%; min-width: 0; }
+/* 卡片右挂芯片行时，说明列必须保住最小可读宽度：.setting-info 是
+   flex-basis:0 的伸缩项，芯片行按 max-content 抢占后它会被压到几像素，
+   中文没有可断词点 → 每行一个字，卡片被撑成一条竖排长条。
+   窄屏尤其必现（402pt 下实测说明列只剩 4px）。 */
+.setting-card:has(> .chip-row) > .setting-info { min-width: 8.5em; }
 .font-setting-card {
   flex-direction: column;
   align-items: stretch;
@@ -4264,7 +3780,10 @@ useEscapeClose(
   gap: 6px;
 }
 
-.chip-row { flex-shrink: 0; }
+/* 芯片行在卡片右侧；flex-shrink:0 让它取 max-content，窄屏（402pt）
+   下永不换行 → 溢出屏幕，并把 .setting-info 挤成竖排单字。
+   改为可收缩 + min-width:0，宽屏仍靠右，窄屏自动换行下移。 */
+.chip-row { flex-shrink: 1; min-width: 0; max-width: 100%; }
 .chip-wrap { margin-top: 8px; }
 
 .m3-chip {
@@ -4744,21 +4263,32 @@ useEscapeClose(
 }
 
 @media (max-width: 760px) {
+  /* 窄屏保持「固定视口 + 内部容器滚动」，不要改成整页滚动。
+     旧实现把 .content 设为 height:auto 并让内部 .settings-content-scroll
+     变成 overflow:visible，滚动高度只能由 flex 列间接推导；实测滑到极限
+     时最后一张卡（取色方式）仍被固定定位的 MiniPlayer 遮住。
+     固定视口 + 内部滚动与桌面行为一致，不需要猜 flex 高度。 */
   :global(.content:has(.settings-view)) {
-    height: auto;
-    overflow-y: auto;
+    height: 100%;
+    max-height: none;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .settings-view {
-    height: auto;
-    min-height: 100%;
-    overflow: visible;
-    padding: 20px 18px 32px;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    padding: 20px 18px 0;
   }
 
   .settings-layout {
-    display: block;
-    height: auto;
+    /* flex 列 + height:100%：让 .settings-content 拿到确定高度，
+       内部 .settings-content-scroll 才能 flex:1 独立滚动。
+       用 display:block/height:auto 时子元素高度无约束，滚动失效。 */
+    display: flex;
+    flex-direction: column;
+    height: 100%;
     min-height: 0;
     max-width: none;
   }
@@ -4766,6 +4296,8 @@ useEscapeClose(
   .settings-sidebar {
     position: static;
     min-height: 0;
+    /* 侧栏只占内容高度，不参与压缩；否则 flex 列里它会挤压内容区 */
+    flex: 0 0 auto;
     overflow: visible;
     padding: 0;
   }
@@ -4781,6 +4313,7 @@ useEscapeClose(
     flex-direction: row;
     gap: 8px;
     overflow-x: auto;
+    touch-action: pan-x;
     padding: 0 2px 8px;
     scrollbar-width: none;
 
@@ -4798,18 +4331,33 @@ useEscapeClose(
 
   .settings-nav-copy small { display: none; }
 
+  /* 必须是 flex 列：.settings-content-scroll 靠 flex:1 + min-height:0
+     才能拿到确定高度并独立滚动。之前这里是 display:block，
+     flex 链断开后滚动容器拿不到约束，内容被裁且滑不到底。 */
   .settings-content {
     max-width: none;
+    min-width: 0;
     min-height: 0;
-    display: block;
-    overflow: visible;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     padding-top: 12px;
   }
 
-  /* 窄屏下整页滚动，内部滚动容器退化为普通块 */
+  /* 窄屏保留内部滚动容器（不要退化为普通块，见上方 760 断点注释）。
+     MiniPlayer 与底部导航是固定定位、不占文档流，必须在滚动容器
+     末尾补出它们的高度，否则最后一张卡永远贴在它俩下面。 */
   .settings-content-scroll {
-    overflow: visible;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
     padding-right: 0;
+    padding-bottom: calc(
+      var(--mini-player-height, 76px) + var(--side-nav-height, 0px) + 16px
+    );
   }
 
   .settings-content-header {
@@ -4822,6 +4370,20 @@ useEscapeClose(
 @media (max-width: 480px) {
   .settings-view { padding-inline: 14px; }
 
+  /* 语言/默认页等卡片右侧挂芯片行：窄屏一行放不下 4 个语言芯片，
+     继续并排会把说明文字挤成竖排单字。改为芯片换到说明下方占满整宽。 */
+  .setting-card:has(> .chip-row) {
+    flex-wrap: wrap;
+
+    .chip-row {
+      flex-basis: 100%;
+      margin-left: 50px; /* 对齐图标右侧的文字列 */
+      margin-top: 10px;
+    }
+  }
+}
+
+@media (max-width: 480px) {
   .settings-nav-item {
     flex-basis: 184px;
     padding-inline: 10px;
@@ -4845,53 +4407,4 @@ useEscapeClose(
   .sub-card { margin-left: 20px; }
 }
 
-/* 快捷键说明 */
-.shortcut-card { align-items: flex-start; }
-
-.shortcut-list {
-  list-style: none;
-  margin: 12px 0 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 6px 20px;
-}
-
-.shortcut-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 26px;
-}
-
-.shortcut-label {
-  font-size: 13px;
-  color: var(--md-on-surface-variant);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.shortcut-keys {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.shortcut-keys kbd {
-  min-width: 24px;
-  padding: 2px 7px;
-  border-radius: var(--radius-sm, 8px);
-  background: var(--md-surface-container-highest);
-  border: 1px solid var(--md-outline-variant, rgba(255, 255, 255, 0.12));
-  border-bottom-width: 2px;
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 16px;
-  text-align: center;
-  color: var(--md-on-surface);
-}
 </style>

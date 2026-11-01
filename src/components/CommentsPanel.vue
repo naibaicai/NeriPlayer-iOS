@@ -896,10 +896,27 @@ function enterDelay(index: number): string {
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding-top: var(--titlebar-height, 36px);
+  padding-top: calc(var(--titlebar-height, 36px) + var(--safe-area-top, 0px));
   background: var(--bg-solid-container, var(--md-surface-container));
   color: var(--md-on-surface);
   box-shadow: -4px 0 24px rgb(0 0 0 / 0.3);
+}
+
+/* 竖屏/窄屏：评论独占整页。
+   402pt 宽下侧边抽屉最宽 94vw=378pt，左侧只剩 24pt 露出的页面碎片，
+   既挡不住下面内容也没换来任何阅读宽度；改为整页覆盖，从下往上推入。 */
+@media (max-width: 640px) {
+  .comments-overlay {
+    justify-content: stretch;
+    background: transparent;
+  }
+
+  .comments-panel {
+    width: 100%;
+    max-width: none;
+    box-shadow: none;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
 }
 
 /* 开合都走 transition：半路关掉会从当前位置反向收回，不会闪现 */
@@ -913,6 +930,14 @@ function enterDelay(index: number): string {
 .comments-sheet-leave-to {
   background-color: transparent;
   .comments-panel { transform: translateX(100%); }
+}
+
+/* 整页模式跟随纵向语义：从底部推入，而不是横向滑入 */
+@media (max-width: 640px) {
+  .comments-sheet-enter-from,
+  .comments-sheet-leave-to {
+    .comments-panel { transform: translateY(100%); }
+  }
 }
 
 .comments-header {

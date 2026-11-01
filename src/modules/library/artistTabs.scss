@@ -4,10 +4,20 @@
   border-radius: 24px;
   background: var(--md-surface-container);
   margin-bottom: 12px;
+  /* 窄屏下标签放不下时横滑，而不是把文字压成省略号 */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+
+  &::-webkit-scrollbar { display: none; }
+
+  > * { flex: 0 0 auto; }
 }
 
 .artist-tab {
-  flex: 1;
+  flex: 1 0 auto;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   justify-content: center;

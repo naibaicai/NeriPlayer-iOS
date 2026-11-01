@@ -23,3 +23,37 @@ impl<'a, R: Runtime, M: Manager<R>> MainBrowserArgs<R> for WebviewWindowBuilder<
         }
     }
 }
+
+/// 桌面专属的窗口构建方法。
+///
+/// `center` / `skip_taskbar` 在 iOS/Android 上不存在（Tauri 按平台裁剪了这部分 API），
+/// 而调用点散落在登录窗口、网易云取令牌窗口、YouTube player 窗口里，
+/// 逐处加 cfg 会让业务代码难以阅读，所以统一收敛到这个扩展 trait。
+/// 移动端退化为 no-op：移动端只有全屏主窗口，「居中」与「不进任务栏」本就没有意义。
+pub trait DesktopWindowExt<R: Runtime>: Sized {
+    fn desktop_center(self) -> Self;
+    /// 隐藏窗口不进任务栏：移动端无此概念，参数保留只为调用处语义统一
+    fn desktop_skip_taskbar(self) -> Self;
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+impl<'a, R: Runtime, M: Manager<R>> DesktopWindowExt<R> for WebviewWindowBuilder<'a, R, M> {
+    fn desktop_center(self) -> Self {
+        self.center()
+    }
+
+    fn desktop_skip_taskbar(self) -> Self {
+        self.skip_taskbar(true)
+    }
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+impl<'a, R: Runtime, M: Manager<R>> DesktopWindowExt<R> for WebviewWindowBuilder<'a, R, M> {
+    fn desktop_center(self) -> Self {
+        self
+    }
+
+    fn desktop_skip_taskbar(self) -> Self {
+        self
+    }
+}

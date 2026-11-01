@@ -2,7 +2,7 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::api::transport::FallbackHttp;
+use crate::api::transport::{parse_json_response, FallbackHttp};
 use crate::error::AppResult;
 
 const BASE_URL: &str = "https://lrclib.net/api";
@@ -60,7 +60,8 @@ impl LrcLibClient {
             return Ok(None);
         }
 
-        let result: LrcLibResult = resp.json().await?;
+        // 统一走传输层解析：429/5xx/HTML 错误页会给出可读原因，而不是 JSON 语法错
+        let result: LrcLibResult = parse_json_response(resp, "lrclib get").await?;
         Ok(Some(result))
     }
 
@@ -76,7 +77,7 @@ impl LrcLibClient {
             })
             .await?;
 
-        let results: Vec<LrcLibResult> = resp.json().await?;
+        let results: Vec<LrcLibResult> = parse_json_response(resp, "lrclib search").await?;
         Ok(results)
     }
 }

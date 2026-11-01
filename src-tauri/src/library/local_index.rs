@@ -12,10 +12,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
+
+// 文件系统监视只在桌面平台可用：iOS 沙盒里没有 inotify/FSEvents 那套目录级
+// 监视语义，notify 也不为移动平台提供后端。移动端靠启动时的一次增量扫描兜底
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 
 use super::scanner::{self, IndexedTrack, ScanSkipped};
 use crate::error::{AppError, AppResult};
@@ -23,6 +27,13 @@ use crate::state::TrackInfo;
 
 const INDEX_FILE: &str = "local-library.json";
 const INDEX_VERSION: u32 = 1;
+
+/// 桌面平台的实时文件监视句柄；移动平台退化为单元类型，
+/// 好让 Runtime 的字段不必整块条件编译
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+type WatcherSlot = RecommendedWatcher;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+type WatcherSlot = ();
 /// 最后一个文件事件之后静默这么久才重扫：拷贝一整张专辑只触发一次
 const WATCH_SETTLE: Duration = Duration::from_millis(1500);
 pub const CHANGED_EVENT: &str = "local-library-changed";
@@ -83,7 +94,7 @@ struct Runtime {
     /// 扫描进行中又来了新的请求：结束后补一轮，保证最后一次改动一定被看到
     rescan_requested: AtomicBool,
     cancelled: AtomicBool,
-    watcher: Mutex<Option<RecommendedWatcher>>,
+    watcher: Mutex<Option<WatcherSlot>>,
     pending: Mutex<PendingChanges>,
     app: Mutex<Option<AppHandle>>,
 }
@@ -356,6 +367,7 @@ fn starts_with_folder(path: &str, folder: &str) -> bool {
         || path.strip_prefix(folder).is_some_and(|rest| rest.starts_with(std::path::is_separator))
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn on_fs_event(result: notify::Result<notify::Event>) {
     let Ok(event) = result else { return };
     if matches!(event.kind, notify::EventKind::Access(_)) {
@@ -427,6 +439,7 @@ fn ensure_settle_thread() {
         .ok();
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn rebuild_watcher(runtime: &Runtime) {
     let folders: Vec<String> = runtime.library.lock().index.folders.iter().map(|folder| folder.path.clone()).collect();
     let mut slot = runtime.watcher.lock();
@@ -453,6 +466,8 @@ fn rebuild_watcher(runtime: &Runtime) {
 pub fn start(app: AppHandle) {
     let runtime = runtime();
     *runtime.app.lock() = Some(app);
+    // 移动平台没有目录监视后端，只做一次启动增量校对
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     rebuild_watcher(runtime);
     if !runtime.library.lock().index.folders.is_empty() {
         spawn_scan(Arc::clone(runtime), None, HashSet::new());
@@ -482,6 +497,8 @@ pub fn add_folder(path: &str) -> AppResult<LocalLibrarySnapshot> {
         });
         save_index(&library.index);
     }
+    // 移动平台没有监视后端（rebuild_watcher 整体 cfg 掉），调用点同步门控
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     rebuild_watcher(runtime);
     spawn_scan(Arc::clone(runtime), Some(HashSet::from([normalized])), HashSet::new());
     Ok(snapshot_of(runtime))
@@ -495,6 +512,7 @@ pub fn remove_folder(path: &str) -> LocalLibrarySnapshot {
         library.index.entries.remove(path);
         save_index(&library.index);
     }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     rebuild_watcher(runtime);
     emit_changed(runtime);
     snapshot_of(runtime)

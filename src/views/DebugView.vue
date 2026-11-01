@@ -266,7 +266,9 @@ const decoderText = computed(() => {
 })
 
 const audioText = computed(() => [
-  settingsStore.audioOutputDevice || t('settings.debug_runtime_default_device'),
+  player.audioEffectsOutputDevice === 'system_default'
+    ? t('settings.debug_runtime_default_device')
+    : player.audioEffectsOutputDevice,
   `vol ${Math.round(player.volume * 100)}%`,
   `×${settingsStore.playbackSpeed}`,
   settingsStore.normalizeVolume ? 'loudness' : '',

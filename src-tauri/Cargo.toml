@@ -1,15 +1,27 @@
 [package]
-name = "neri-player-desktop"
+name = "neri-player-ios"
 version = "1.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
+
+[lib]
+# 库名保持与包名一致（neri_player_ios），main.rs 的调用与之对应。
+# staticlib：iOS 把 Rust 当静态库链进 Xcode 工程（入口符号 start_app，
+#            由 mobile_entry_point 宏导出）。
+# rlib：桌面端 bin 目标要链这个库。
+# 不保留 cdylib：cdylib 只有 Android 用；而且它要求 rustc 自己把产物链接完成，
+# 而 iOS 的 Swift 侧符号（_register_plugin / _tauri_log 等）是由 Xcode 工程
+# 链接 libTauri.a 等提供的，不在 rustc 的链接行里 → ios 真机 release 必报
+# "undefined symbols for architecture arm64"。本项目只做 iOS，故去掉。
+name = "neri_player_ios"
+crate-type = ["staticlib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 cc = "1"
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2.5.4"
 tauri-plugin-store = "2"
 tauri-plugin-dialog = "2"
@@ -36,8 +48,6 @@ iana-time-zone = "0.1"
 thiserror = "2"
 parking_lot = "0.12"
 walkdir = "2"
-# 本地音乐文件夹监视：系统原生事件，无轮询
-notify = "6.1"
 urlencoding = "2"
 regex = "1"
 # 歌词匹配的文本规整：与 Android 一样先繁转简、再做 NFKC
@@ -53,7 +63,6 @@ flate2 = "1"
 zstd = "0.13"
 rquickjs = { version = "0.14", default-features = false }
 quick-xml = "0.39"
-souvlaki = "0.7"
 raw-window-handle = "0.6"
 tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 futures-util = "0.3"
@@ -62,9 +71,26 @@ tempfile = "3"
 image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service"] }
 tauri-plugin-log = "2.9.0"
-tauri-plugin-single-instance = "2"
 rusqlite = { version = "0.40", features = ["bundled"] }
-tauri-plugin-global-shortcut = "2"
+
+# ---- 移动平台专属依赖 ----
+# rquickjs-sys 只随包附带了桌面/主流 Linux 目标的预生成 FFI bindings，
+# iOS/Android 必须走 bindgen 现场生成。特性只在移动目标上启用，桌面构建不受影响
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+rquickjs = { version = "0.14", default-features = false, features = ["bindgen"] }
+
+# ---- 桌面独占依赖 ----
+# iOS/Android 上没有这些能力，整组挂到非移动平台，避免把 Linux 后端
+# （dbus / inotify / global-hotkey）拖进 iOS 交叉编译
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+# 窗口图标与菜单栏托盘
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
+# 本地音乐文件夹监视：系统原生事件，无轮询
+notify = "6.1"
+# 系统媒体会话（SMTC / MPRIS / Now Playing）
+souvlaki = "0.7"
+# 单实例保护、全局快捷键：两者库内部即对移动平台整体 cfg 掉
+tauri-plugin-single-instance = "2"
 
 [target.'cfg(windows)'.dependencies]
 # 最小化时把 WebView2 控制器设为不可见；版本跟随 tauri 使用的 webview2-com
@@ -77,6 +103,11 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphic
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSToolbar", "NSWindow"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+block2 = "0.6.2"
+objc2-av-foundation = { version = "0.3.2", features = ["AVAudioSession"] }
+objc2-media-player = { version = "0.3.2", features = ["block2"] }
 
 [profile.dev.package.symphonia]
 opt-level = 2

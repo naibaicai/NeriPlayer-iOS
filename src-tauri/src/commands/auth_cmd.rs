@@ -8,7 +8,7 @@ use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowE
 
 // 三平台登录/登出命令
 use crate::api::youtube::client::YouTubeAccountProfile;
-use crate::webview_args::MainBrowserArgs;
+use crate::webview_args::{DesktopWindowExt, MainBrowserArgs};
 use crate::auth::cookies;
 use crate::auth::state::{
     AuthInfo, AuthStatusResponse, BiliAuth, CookieEntry, NeteaseAuth, YouTubeAuth,
@@ -16,12 +16,108 @@ use crate::auth::state::{
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
+/// 第三方登录页的安全区补偿。
+///
+/// 这些页面（B站/网易云/Google）不知道 iPhone 的灵动岛与 Home 指示条，内容会顶到
+/// 系统元素下面。**关键**：`env(safe-area-inset-*)` 只有在 viewport meta 带
+/// `viewport-fit=cover` 时才返回真实数值，否则一律是 0 —— 上一版只注入了 padding，
+/// 变量取到 0，看着像完全没生效。所以这里先把 viewport 补成 cover，再让开安全区。
+#[cfg(any(target_os = "ios", target_os = "android"))]
+const LOGIN_SAFE_AREA_SCRIPT: &str = r#"
+(function () {
+  function ensureViewportCover() {
+    var vp = document.querySelector('meta[name="viewport"]');
+    if (!vp) {
+      vp = document.createElement('meta');
+      vp.setAttribute('name', 'viewport');
+      (document.head || document.documentElement).appendChild(vp);
+    }
+    var content = vp.getAttribute('content') || '';
+    if (content.indexOf('viewport-fit=cover') === -1) {
+      vp.setAttribute('content', (content ? content + ', ' : '') + 'viewport-fit=cover');
+    }
+  }
+
+  function ensureStyle() {
+    if (!document.head || document.getElementById('neri-safe-area')) return;
+    var style = document.createElement('style');
+    style.id = 'neri-safe-area';
+    style.textContent = [
+      'html {',
+      '  padding-top: env(safe-area-inset-top, 0px) !important;',
+      '  padding-bottom: env(safe-area-inset-bottom, 0px) !important;',
+      '  box-sizing: border-box !important;',
+      '}',
+      'body {',
+      '  padding-top: env(safe-area-inset-top, 0px) !important;',
+      '  padding-bottom: env(safe-area-inset-bottom, 0px) !important;',
+      '  box-sizing: border-box !important;',
+      '}'
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+
+  function apply() {
+    try { ensureViewportCover(); ensureStyle(); } catch (e) {}
+  }
+
+  apply();
+  document.addEventListener('DOMContentLoaded', apply, { once: true });
+  window.addEventListener('load', apply, { once: true });
+})();
+"#;
+
 const BILIBILI_LOGIN_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 
 // 登录检测机制：
 // 打开 WebviewWindow 加载平台登录页
 // 每 800ms 调用 Tauri 内置 cookies_for_url() 读取 Cookie（含 HttpOnly）
 // 检测到 sentinel cookie 后关闭窗口，保存 cookie
+
+/// 登录窗口的尺寸与定位。
+///
+/// 桌面：420×600（YouTube 480×680）居中浮动窗口，登录是次要任务，不占满屏。
+/// iOS：Tauri 在 iPhone/iPad 上把手建窗口铺到整个视图，却仍按 inner_size
+/// 定位，于是弹窗只占屏幕一部分，四周露出设置页；顶部压在状态栏/灵动岛下、
+/// 底部压到 Home 指示条上，二维码被裁掉。移动端因此改为全屏窗口，
+/// 安全区交给页面自身的 viewport-fit=cover 处理。
+fn configure_login_window<'a, R: tauri::Runtime, M: Manager<R>>(
+    app: &AppHandle,
+    builder: tauri::WebviewWindowBuilder<'a, R, M>,
+    width: f64,
+    height: f64,
+) -> tauri::WebviewWindowBuilder<'a, R, M> {
+    // 移动端没有「浮动窗口」概念：Tauri 的手建窗口铺在整个视图上，
+    // 但仍按 inner_size 摆放，420×600 在 402×874 的屏上会横向溢出、
+    // 纵向留出底部的设置页，登录页被状态栏和 Home 指示条两头夹住。
+    // 这里取主窗口的实际像素尺寸铺满，安全区交给页面 viewport-fit=cover。
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        let _ = (width, height);
+        // 取屏幕（monitor）而不是主窗口：主窗口的逻辑尺寸来自 tauri.conf 的
+        // 1280×800，被系统缩放后并不等于屏幕，照抄会得到一个偏窄偏矮的窗口，
+        // 底部仍露出导航条。monitor 的 physical size 才是满屏尺寸。
+        let monitor = app.primary_monitor().ok().flatten();
+        match monitor {
+            Some(m) => {
+                let scale = m.scale_factor();
+                let size = m.size();
+                builder
+                    .inner_size(size.width as f64 / scale, size.height as f64 / scale)
+                    .position(0.0, 0.0)
+                    // 第三方登录页不认识 iOS 安全区，顶部内容会顶到灵动岛下沿。
+                    // 注入一层 padding 把 body 整体让开，滚动容器本身不受影响。
+                    .initialization_script(LOGIN_SAFE_AREA_SCRIPT)
+            }
+            None => builder,
+        }
+    }
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        let _ = app;
+        builder.inner_size(width, height).desktop_center()
+    }
+}
 
 fn track_login_window_close<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
@@ -445,14 +541,13 @@ async fn poll_webview_cookies(
 #[tauri::command]
 pub async fn login_netease(app: AppHandle, state: State<'_, AppState>) -> AppResult<AuthInfo> {
     let label = "netease-login";
-    let window = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         &app,
         label,
         WebviewUrl::External("https://music.163.com/#/login".parse().unwrap()),
     )
-    .title("NeriPlayer - 网易云音乐登录")
-    .inner_size(420.0, 600.0)
-    .center()
+    .title("NeriPlayer - 网易云音乐登录");
+    let window = configure_login_window(&app, builder, 420.0, 600.0)
     .main_browser_args(&app)
     .build()
     .map_err(|e| AppError::Other(format!("Failed to create login window: {}", e)))?;
@@ -512,14 +607,13 @@ pub async fn login_netease(app: AppHandle, state: State<'_, AppState>) -> AppRes
 #[tauri::command]
 pub async fn login_bilibili(app: AppHandle, state: State<'_, AppState>) -> AppResult<AuthInfo> {
     let label = "bilibili-login";
-    let window = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         &app,
         label,
         WebviewUrl::External("https://passport.bilibili.com/login".parse().unwrap()),
     )
-    .title("NeriPlayer - 哔哩哔哩登录")
-    .inner_size(420.0, 600.0)
-    .center()
+    .title("NeriPlayer - 哔哩哔哩登录");
+    let window = configure_login_window(&app, builder, 420.0, 600.0)
     .user_agent(BILIBILI_LOGIN_USER_AGENT)
     .main_browser_args(&app)
     .build()
@@ -597,14 +691,13 @@ pub async fn login_youtube(app: AppHandle, state: State<'_, AppState>) -> AppRes
     let login_url = "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F";
     let label = "youtube-login";
 
-    let window = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         &app,
         label,
         WebviewUrl::External(login_url.parse().unwrap()),
     )
-    .title("NeriPlayer - YouTube Music Login")
-    .inner_size(480.0, 680.0)
-    .center()
+    .title("NeriPlayer - YouTube Music Login");
+    let window = configure_login_window(&app, builder, 480.0, 680.0)
     .main_browser_args(&app)
     .build()
     .map_err(|e| AppError::Other(format!("Failed to create login window: {}", e)))?;

@@ -208,11 +208,6 @@ enum AudioCmd {
         reply: mpsc::Sender<Option<u64>>,
     },
     SetVolume(f32),
-    SetOutputDevice {
-        name: Option<String>,
-        cancel: Arc<AtomicBool>,
-        reply: mpsc::Sender<Result<(), String>>,
-    },
     SetSpeed(f32),
     Seek {
         position_ms: u64,
@@ -425,28 +420,6 @@ pub struct AudioOutputDevice {
     pub is_default: bool,
 }
 
-pub struct OutputDeviceChangeRequest {
-    receiver: mpsc::Receiver<Result<(), String>>,
-    cancel: Arc<AtomicBool>,
-    completed: bool,
-}
-
-impl OutputDeviceChangeRequest {
-    pub fn wait(mut self) -> AppResult<()> {
-        let result = self.receiver.recv_timeout(COMMAND_TIMEOUT);
-        self.completed = result.is_ok();
-        result.map_err(|error| AppError::Audio(error.to_string()))?.map_err(AppError::Audio)
-    }
-}
-
-impl Drop for OutputDeviceChangeRequest {
-    fn drop(&mut self) {
-        if !self.completed {
-            self.cancel.store(true, Ordering::Release);
-        }
-    }
-}
-
 /// 能输出的设备，按默认混音格式判断
 ///
 /// 不用 cpal 的 `output_devices()`：它对每个设备试探几十种格式，cpal 0.15 在 WASAPI 上
@@ -474,27 +447,21 @@ pub fn list_audio_output_devices() -> AppResult<Vec<AudioOutputDevice>> {
 }
 
 struct OutputDeviceState {
-    preferred_name: Option<String>,
     profile: Option<OutputDeviceProfile>,
 }
 
-fn effective_output_name<'a>(
-    preferred: Option<&'a str>,
-    available: &[&str],
-    default: Option<&'a str>,
-) -> Option<&'a str> {
-    preferred.filter(|name| available.contains(name)).or(default)
+fn effective_output_name<'a>(available: &[&'a str], default: Option<&'a str>) -> Option<&'a str> {
+    default.filter(|name| available.contains(name)).or_else(|| default)
 }
 
 /// 设备列表更新后要切到的输出设备；已经在用目标设备时返回 None
 fn output_device_to_switch(
-    preferred: Option<&str>,
     available: &[String],
     default: Option<&str>,
     current: Option<&str>,
 ) -> Option<String> {
     let names: Vec<&str> = available.iter().map(String::as_str).collect();
-    let target = effective_output_name(preferred, &names, default)?;
+    let target = effective_output_name(&names, default)?;
     (current != Some(target)).then(|| target.to_string())
 }
 
@@ -1238,17 +1205,6 @@ impl PlayerEngine {
         self.effects.dsp.set_volume(self.volume);
     }
 
-    pub fn request_output_device(
-        &self,
-        name: Option<String>,
-    ) -> AppResult<OutputDeviceChangeRequest> {
-        let (reply, receiver) = mpsc::channel();
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.cmd_tx.send(AudioCmd::SetOutputDevice { name, cancel: Arc::clone(&cancel), reply })
-            .map_err(|error| AppError::Audio(error.to_string()))?;
-        Ok(OutputDeviceChangeRequest { receiver, cancel, completed: false })
-    }
-
     pub fn set_speed(&mut self, speed: f32) {
         self.speed = speed.clamp(0.1, 4.0);
         // 倍速在输出端实时生效，不需要重建会话
@@ -1752,7 +1708,7 @@ fn audio_control_loop(
     };
 
     if let Some(profile) = &profile { effects.dsp.select_output(&profile.name); }
-    let mut output_profile = OutputDeviceState { preferred_name: None, profile };
+    let mut output_profile = OutputDeviceState { profile };
     let mut reporter = MetricsReporter::new();
     loop {
         let output_in_use = current
@@ -1785,7 +1741,6 @@ fn audio_control_loop(
         match command {
             AudioCmd::OutputDevicesListed { available, default } => {
                 let Some(name) = output_device_to_switch(
-                    output_profile.preferred_name.as_deref(),
                     &available,
                     default.as_deref(),
                     output_profile.profile.as_ref().map(|profile| profile.name.as_str()),
@@ -2001,35 +1956,6 @@ fn audio_control_loop(
                 if let Some(session) = &current {
                     session.shared.volume.store(volume);
                 }
-            }
-            AudioCmd::SetOutputDevice { name, cancel, reply } => {
-                if cancel.load(Ordering::Acquire) {
-                    let _ = reply.send(Err("Audio output change cancelled".into()));
-                    continue;
-                }
-                let name = name.map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
-                let result = match name.as_deref() {
-                    Some(name) => OutputDeviceProfile::open_named(name),
-                    None => OutputDeviceProfile::open_default(),
-                }.and_then(|candidate| {
-                    if cancel.load(Ordering::Acquire) {
-                        return Err("Audio output change cancelled".into());
-                    }
-                    if output_profile.profile.as_ref().is_some_and(|profile| profile.name == candidate.name) {
-                        Ok(())
-                    } else {
-                        switch_output_device_in_place(
-                            &mut current, candidate, &mut output_profile, volume, speed,
-                            &shared_level, &effects, &playback_generation, &loopback_tx,
-                            cancel,
-                        )
-                    }
-                });
-                if result.is_ok() {
-                    output_profile.preferred_name = name;
-                    if let Some(profile) = &output_profile.profile { effects.dsp.select_output(&profile.name); }
-                }
-                let _ = reply.send(result);
             }
             AudioCmd::SetSpeed(next_speed) => {
                 speed = next_speed.clamp(0.1, 4.0);
@@ -2530,12 +2456,7 @@ fn ensure_output_profile(
     output_profile: &mut OutputDeviceState,
 ) -> Result<&OutputDeviceProfile, String> {
     if output_profile.profile.is_none() {
-        let selected = output_profile.preferred_name.as_deref()
-            .map(OutputDeviceProfile::open_named);
-        output_profile.profile = Some(match selected {
-            Some(Ok(profile)) => profile,
-            _ => OutputDeviceProfile::open_default()?,
-        });
+        output_profile.profile = Some(OutputDeviceProfile::open_default()?);
     }
     output_profile
         .profile
@@ -3773,22 +3694,9 @@ mod tests {
     }
 
     #[test]
-    fn android_alignment_abandoned_output_change_is_cancelled() {
-        let (_sender, receiver) = std::sync::mpsc::channel();
-        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        drop(super::OutputDeviceChangeRequest { receiver, cancel: cancel.clone(), completed: false });
-        assert!(cancel.load(std::sync::atomic::Ordering::Acquire));
-    }
-
-    #[test]
     fn android_alignment_output_selection_follows_default_changes() {
-        assert_eq!(super::effective_output_name(None, &["speaker", "headphones"], Some("headphones")), Some("headphones"));
-        assert_eq!(super::effective_output_name(None, &["speaker", "headphones"], Some("speaker")), Some("speaker"));
-    }
-
-    #[test]
-    fn android_alignment_output_selection_preserves_an_available_preference() {
-        assert_eq!(super::effective_output_name(Some("speaker"), &["speaker", "headphones"], Some("headphones")), Some("speaker"));
+        assert_eq!(super::effective_output_name(&["speaker", "headphones"], Some("headphones")), Some("headphones"));
+        assert_eq!(super::effective_output_name(&["speaker", "headphones"], Some("speaker")), Some("speaker"));
     }
 
     #[test]
@@ -3824,25 +3732,27 @@ mod tests {
     #[test]
     fn listed_devices_switch_output_only_when_the_target_changes() {
         let available = vec!["speaker".to_string(), "headphones".to_string()];
-        assert_eq!(super::output_device_to_switch(None, &available, Some("headphones"), Some("headphones")), None);
+        assert_eq!(super::output_device_to_switch(&available, Some("headphones"), Some("headphones")), None);
         assert_eq!(
-            super::output_device_to_switch(None, &available, Some("headphones"), Some("speaker")).as_deref(),
+            super::output_device_to_switch(&available, Some("headphones"), Some("speaker")).as_deref(),
             Some("headphones"),
         );
-        assert_eq!(super::output_device_to_switch(Some("speaker"), &available, Some("headphones"), Some("speaker")), None);
         assert_eq!(
-            super::output_device_to_switch(None, &available, Some("speaker"), None).as_deref(),
+            super::output_device_to_switch(&available, Some("speaker"), None).as_deref(),
             Some("speaker"),
             "还没有设备档案时直接打开目标设备",
         );
-        assert_eq!(super::output_device_to_switch(None, &[], None, Some("speaker")), None);
+        assert_eq!(super::output_device_to_switch(&[], None, Some("speaker")), None);
     }
 
     #[test]
-    fn android_alignment_output_selection_falls_back_and_recovers_after_disconnect() {
-        assert_eq!(super::effective_output_name(Some("headphones"), &["speaker"], Some("speaker")), Some("speaker"));
-        assert_eq!(super::effective_output_name(Some("headphones"), &["speaker", "headphones"], Some("speaker")), Some("headphones"));
-        assert_eq!(super::effective_output_name(Some("headphones"), &[], None), None);
+    fn android_alignment_output_selection_follows_the_system_default_after_disconnect() {
+        // 拔掉耳机后系统默认切回扬声器，输出跟着走
+        assert_eq!(super::effective_output_name(&["speaker"], Some("speaker")), Some("speaker"));
+        assert_eq!(super::effective_output_name(&["speaker", "headphones"], Some("headphones")), Some("headphones"));
+        assert_eq!(super::effective_output_name(&[], None), None);
+        // 系统报的默认设备不在枚举结果里时，仍按默认打开，交给 open_named 报错
+        assert_eq!(super::effective_output_name(&[], Some("speaker")), Some("speaker"));
     }
 
     use super::{

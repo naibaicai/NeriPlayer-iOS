@@ -20,9 +20,6 @@ function load(source, dependencies = {}) {
 
 const matcher = load(await read('../src/modules/search/textMatcher.ts'), { 'pinyin-pro': require('pinyin-pro') })
 const { filterAndRank, searchMatches, searchScore, searchValue, trackSearchTokens } = matcher
-const bindings = load(await read('../src/modules/shortcuts/bindings.ts'), {
-  './platform': load(await read('../src/modules/shortcuts/platform.ts')),
-})
 
 let cases = 0
 function check(name, run) {
@@ -81,28 +78,6 @@ check('scores order exact < prefix < contains and empty query keeps everything',
   assert.equal(searchScore('  ', ['x']), 0)
   assert.equal(filterAndRank('', tracks, trackSearchTokens).length, tracks.length)
   assert.ok(searchScore('a', [searchValue('a', 10)]) > searchScore('a', ['a']))
-})
-
-check('shortcut bindings normalize, override and convert to accelerators', () => {
-  const normalized = bindings.normalizeShortcutBindings({
-    local: { next: 'shift+mod+arrowright', bogus: 'A', mute: '' },
-    global: { search: 'Mod+Alt+F', toggle_play: 'Mod+Alt+Escape', like: 'Alt+Mod+K' },
-  })
-  assert.deepEqual(normalized.local, { next: 'Mod+Shift+ArrowRight', mute: '' }, 'case-insensitive names, unknown actions dropped')
-  assert.equal(normalized.global.search, undefined, 'search cannot be global')
-  assert.equal(normalized.global.toggle_play, undefined, 'Escape is reserved')
-  assert.equal(normalized.global.like, 'Mod+Alt+K')
-  const local = bindings.effectiveShortcuts(normalized, 'local')
-  assert.equal(local.mute, '', 'explicit clear survives defaults')
-  assert.equal(local.toggle_play, 'Space')
-  assert.equal(local.show_window, '', 'global-only actions are never local')
-  const reset = bindings.withShortcut(normalized, 'global', 'like', bindings.DEFAULT_GLOBAL_SHORTCUTS.like)
-  assert.equal('like' in reset.global, false, 'default values are not stored')
-  assert.equal(bindings.toAccelerator('Mod+Alt+ArrowRight'), 'CommandOrControl+Alt+ArrowRight')
-  assert.equal(bindings.toAccelerator('Mod+Shift+='), 'CommandOrControl+Shift+Equal')
-  assert.equal(bindings.toAccelerator('Mod+MediaPlayPause'), null)
-  const conflicts = bindings.conflictingActions({ ...local, like: 'Space' })
-  assert.deepEqual(conflicts.get('Space'), ['toggle_play', 'like'])
 })
 
 console.log(`Search matcher regressions: ${cases} passed`)

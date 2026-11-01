@@ -1,6 +1,6 @@
 // 主题色管理：点击色块实时切换全局 CSS 变量
 // 色值参考 Material Theme Builder (material-foundation/material-color-utilities) 生成
-import { detectPlatform } from '@/modules/shortcuts/platform'
+import { detectPlatform } from '@/modules/platform'
 
 // WebKitGTK 的 View Transition 会整页快照合成，在 Linux 上曾导致
 // GTK 主循环内 WebKit 回调 SEGV 崩溃；Linux 走平滑过渡降级路径

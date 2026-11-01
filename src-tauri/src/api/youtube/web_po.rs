@@ -10,7 +10,7 @@ use tauri::{
 
 use crate::auth::state::YouTubeAuth;
 use crate::error::{AppError, AppResult};
-use crate::webview_args::MainBrowserArgs;
+use crate::webview_args::{DesktopWindowExt, MainBrowserArgs};
 
 const TOKEN_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 const BRIDGE_HOST: &str = "neriplayer-youtube-bridge.invalid";
@@ -273,7 +273,7 @@ async fn mint_on_page(
             WebviewUrl::External("about:blank".parse().expect("static URL")),
         )
         .visible(false)
-        .skip_taskbar(true)
+        .desktop_skip_taskbar()
         .incognito(true)
         .user_agent(super::client::USER_AGENT)
         .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)

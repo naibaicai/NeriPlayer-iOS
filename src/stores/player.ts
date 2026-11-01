@@ -2912,7 +2912,8 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   const audioEffects = computed(() => settings.audioEffects)
-  const audioEffectsOutputDevice = ref(settings.audioOutputDevice || 'system_default')
+  // 实际输出设备名由后端 get_audio_effects_stats 回填，这里先跟随系统默认
+  const audioEffectsOutputDevice = ref('system_default')
   const audioEffectsProfile = computed(() => audioEffectsProfileFor(audioEffects.value, audioEffectsOutputDevice.value))
   const listeningTuning = computed(() => listeningTuningValues(audioEffectsProfile.value.sound))
   let audioEffectsRevision = 0
@@ -3068,10 +3069,6 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   watch(() => settings.audioEffects, scheduleNativeAudioEffects, { deep: true })
-  watch(() => settings.audioOutputDevice, () => {
-    void refreshAudioEffectsStats().catch(error => log.warn('audio effects output unavailable:', error))
-  })
-
   // 旧版响度参数继续保留，均衡器数据仅供兼容旧配置
   const loudnessGainMb = ref(settings.loudnessGainMb)
   const equalizerEnabled = ref(settings.equalizerEnabled)
@@ -3235,11 +3232,6 @@ export const usePlayerStore = defineStore('player', () => {
 
     const restored: Array<[string, Promise<unknown>]> = [
       ['volume', invoke('set_volume', { level: volume.value })],
-      ['output device', invoke('set_audio_output_device', { name: settings.audioOutputDevice || null })
-        .catch((error) => {
-          log.warn('preferred output device unavailable, using the system default:', error)
-          return invoke('set_audio_output_device', { name: null })
-        })],
       ['speed', invoke('set_speed', { speed: effectivePlaybackSpeed() })],
       ['pitch', invoke('set_pitch', { pitch: playbackPitch.value })],
       ['vinyl effect', setVinylEffect(vinylEffectEnabled.value)],
@@ -3340,6 +3332,9 @@ export const usePlayerStore = defineStore('player', () => {
   // 插入到当前曲目之后
   function addToQueueNext(track: TrackInfo) {
     const existing = queue.value.findIndex(t => t.id === track.id)
+    // 正在播放的就是这首：「下一首播放」无意义，直接不动。
+    // 不能走下面的先删后插，否则删除当前曲目会让 queueIndex 指向被顶到前面那首，高亮错位。
+    if (existing !== -1 && existing === queueIndex.value) return
     if (existing !== -1) {
       if (shuffleEnabled.value) shiftShuffleIndicesForRemove(existing)
       queue.value.splice(existing, 1)
@@ -3416,8 +3411,19 @@ export const usePlayerStore = defineStore('player', () => {
     } else if (wasCurrentTrack) {
       // 被删除的是当前曲目，索引保持（指向下一首），但不超界
       queueIndex.value = Math.min(queueIndex.value, queue.value.length - 1)
-      // 同步 currentTrack 到新索引指向的曲目
-      currentTrack.value = queue.value[queueIndex.value]
+      // 必须重新发起播放：只改 currentTrack 会让 UI 显示的曲目与实际出声的音频不一致
+      const nextTrack = queue.value[queueIndex.value]
+      if (nextTrack) {
+        if (isPlaying.value) {
+          void play(nextTrack, 'local_safety')
+        } else {
+          // 暂停状态下删当前曲目：只切换展示目标并归零进度，不能替用户开始播放
+          currentTrack.value = nextTrack
+          setRenderedPosition(0, nextTrack.durationMs)
+        }
+      } else {
+        currentTrack.value = null
+      }
     }
     savePlayerState()
   }
@@ -3426,9 +3432,12 @@ export const usePlayerStore = defineStore('player', () => {
   function clearQueue() {
     queue.value = []
     queueIndex.value = -1
+    currentTrack.value = null
     shuffleBag = []
     shuffleHistory = []
     shuffleFuture = []
+    // 队列已空，音频必须停下，否则会进入「没队列却在放歌」的死状态
+    void pause('local_safety')
     savePlayerState()
   }
 

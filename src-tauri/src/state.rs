@@ -62,7 +62,6 @@ pub struct AppState {
     pub http: parking_lot::RwLock<reqwest::Client>,
     sync_http: parking_lot::RwLock<reqwest::Client>,
     sync_alt_http: parking_lot::RwLock<reqwest::Client>,
-    bypass_system_proxy: AtomicBool,
     /// 共享 Cookie Jar：允许外部注入持久化登录 Cookie
     pub cookie_jar: Arc<reqwest::cookie::Jar>,
     /// 三平台登录状态
@@ -120,7 +119,6 @@ impl AppState {
             sync_alt_http: parking_lot::RwLock::new(
                 Self::build_sync_http(false).expect("Failed to create fallback sync HTTP client"),
             ),
-            bypass_system_proxy: AtomicBool::new(true),
             cookie_jar: jar,
             auth: Mutex::new(AuthState::default()),
             lt_session: Mutex::new(LtSession::new()),
@@ -135,31 +133,6 @@ impl AppState {
         }
     }
 
-    /// 重建 HTTP Client，切换代理模式
-    pub fn rebuild_http(&self, bypass_proxy: bool) {
-        let build = |no_proxy: bool| {
-            let mut builder = api_client_builder(self.cookie_jar.clone());
-            if no_proxy {
-                builder = builder.no_proxy();
-            }
-            builder.build()
-        };
-        if let Ok(client) = build(bypass_proxy) {
-            *self.http.write() = client;
-            self.bypass_system_proxy.store(bypass_proxy, std::sync::atomic::Ordering::Release);
-        }
-        // 备用客户端始终取相反设置
-        if let Ok(client) = build(!bypass_proxy) {
-            *self.alt_http.write() = client;
-        }
-        if let Ok(client) = Self::build_sync_http(bypass_proxy) {
-            *self.sync_http.write() = client;
-        }
-        if let Ok(client) = Self::build_sync_http(!bypass_proxy) {
-            *self.sync_alt_http.write() = client;
-        }
-    }
-
     fn build_sync_http(bypass_proxy: bool) -> Result<reqwest::Client, reqwest::Error> {
         let mut builder = reqwest::Client::builder()
             .user_agent(USER_AGENT)
@@ -170,10 +143,6 @@ impl AppState {
             builder = builder.no_proxy();
         }
         builder.build()
-    }
-
-    pub fn bypasses_system_proxy(&self) -> bool {
-        self.bypass_system_proxy.load(std::sync::atomic::Ordering::Acquire)
     }
 
     // 同步锁和条件写入绑定资源地址，重定向不能绕过目标校验

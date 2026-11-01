@@ -300,7 +300,10 @@ function handleQueueContextMenuClick(item: ContextMenuActionItem) {
           </div>
           <div class="qi-info">
             <div class="qi-title">{{ track.title }}</div>
-            <div class="qi-meta">{{ track.artist }}</div>
+            <div class="qi-meta">
+              <span class="qi-meta-artist">{{ track.artist }}</span>
+              <span class="qi-meta-duration">{{ formatDuration(track.durationMs) }}</span>
+            </div>
           </div>
           <div class="qi-duration">{{ formatDuration(track.durationMs) }}</div>
           <button
@@ -355,6 +358,45 @@ function handleQueueContextMenuClick(item: ContextMenuActionItem) {
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
 }
 
+/* 竖屏/窄屏：队列改为底部抽屉（下向上展开）。
+   侧边抽屉在 402pt 宽屏上只剩 380px 几乎占满，却没有「从哪来回哪去」的
+   手势直觉；底部抽屉符合移动端播放列表的通行交互。 */
+@media (max-width: 640px) {
+  .queue-overlay {
+    justify-content: stretch;
+    align-items: flex-end;
+  }
+
+  .queue-panel {
+    width: 100%;
+    max-width: none;
+    height: auto;
+    max-height: 82vh;
+    border-radius: var(--radius-xl, 24px) var(--radius-xl, 24px) 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.36);
+  }
+
+  /* 抽屉顶部抓手 */
+  .queue-header {
+    position: relative;
+    padding-top: 18px;
+
+    &::before {
+      content: '';
+      position: absolute;
+      top: 7px;
+      left: 50%;
+      width: 36px;
+      height: 4px;
+      margin-left: -18px;
+      border-radius: 999px;
+      background: var(--md-on-surface-variant);
+      opacity: 0.4;
+    }
+  }
+}
+
 /* 由父级 <Transition name="queue-sheet"> 驱动：开合都是 transition，半路反向会从当前位置收回 */
 .queue-overlay.queue-sheet-enter-active,
 .queue-overlay.queue-sheet-leave-active {
@@ -369,6 +411,13 @@ function handleQueueContextMenuClick(item: ContextMenuActionItem) {
 .queue-overlay.queue-sheet-leave-to {
   background-color: transparent;
   .queue-panel { transform: translateX(100%); }
+}
+
+@media (max-width: 640px) {
+  .queue-overlay.queue-sheet-enter-from,
+  .queue-overlay.queue-sheet-leave-to {
+    .queue-panel { transform: translateY(100%); }
+  }
 }
 
 .queue-header {
@@ -534,6 +583,54 @@ function handleQueueContextMenuClick(item: ContextMenuActionItem) {
   min-width: 0;
 }
 
+/* 时长默认独占一列（宽屏有富余）；窄屏并进副标题，把整列宽度让给歌名 */
+.qi-meta-duration {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .queue-item {
+    /* 7 个子项 + 6 个间隙：10px 的间隙在 402pt 上吃掉 60px，标题被压到 150px 内 */
+    gap: 6px;
+    padding: 8px 6px;
+  }
+
+  .qi-index {
+    width: 18px;
+  }
+
+  .qi-duration {
+    display: none;
+  }
+
+  .qi-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .qi-meta-artist {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .qi-meta-duration {
+    display: inline;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 三个 28px 控件在窄屏上各让 2px，四项合计省出 24px 给标题 */
+  .qi-drag-handle,
+  .qi-more,
+  .qi-remove {
+    width: 26px;
+    height: 26px;
+  }
+}
+
 .qi-title {
   font-size: 13px;
   font-weight: 500;
@@ -575,6 +672,13 @@ function handleQueueContextMenuClick(item: ContextMenuActionItem) {
   .queue-item:hover & { opacity: 0.6; }
   &:hover { opacity: 1 !important; background: var(--md-surface-container-highest); }
   .material-symbols-rounded { font-size: 16px; }
+
+  /* 触屏没有 hover：控件必须常显，否则永远点不到「更多」「移除」 */
+  @media (hover: none) {
+    opacity: 0.6;
+
+    .queue-item.active & { opacity: 0.9; }
+  }
 }
 
 .qi-drag-handle {

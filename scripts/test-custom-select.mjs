@@ -169,47 +169,5 @@ await test('device refresh preserves the highlighted value and empty results clo
   } finally { select.stop() }
 })
 
-async function audioSettings() {
-  const source = await readFile(new URL('../src/views/SettingsView.vue', import.meta.url), 'utf8')
-  const script = ts.createSourceFile('settings.ts', parse(source).descriptor.scriptSetup.content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
-  const functions = script.statements.filter(node => ts.isFunctionDeclaration(node) && ['changeAudioOutputDevice', 'loadAudioOutputDevices'].includes(node.name?.text))
-  const compiled = ts.transpileModule(functions.map(node => ts.createPrinter().printNode(ts.EmitHint.Unspecified, node, script)).join('\n'), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
-  }).outputText
-  const calls = [], errors = []
-  let resolve, reject
-  const pending = new Promise((accept, fail) => { resolve = accept; reject = fail })
-  const dependencies = {
-    audioOutputDevice: ref('headphones'), audioOutputDevices: ref([]), audioOutputSwitching: ref(false),
-    invoke: (command, input) => { calls.push({ command, input }); return command === 'set_audio_output_device' ? pending : Promise.resolve([]) },
-    t: key => key, log: { warn() {} }, toast: { error: message => errors.push(message) },
-  }
-  const change = new Function(...Object.keys(dependencies), `${compiled}\nreturn changeAudioOutputDevice`)(...Object.values(dependencies))
-  return { ...dependencies, change, calls, errors, resolve, reject }
-}
-await test('device selection saves only after backend confirmation and ignores duplicate or overlapping requests', async () => {
-  const settings = await audioSettings()
-  await settings.change('headphones')
-  assert.equal(settings.calls.length, 0)
-  const change = settings.change('speakers')
-  assert.equal(settings.audioOutputSwitching.value, true)
-  assert.equal(settings.audioOutputDevice.value, 'headphones')
-  await settings.change('other')
-  assert.deepEqual(settings.calls, [{ command: 'set_audio_output_device', input: { name: 'speakers' } }])
-  settings.resolve(); await change
-  assert.equal(settings.audioOutputDevice.value, 'speakers')
-  assert.equal(settings.audioOutputSwitching.value, false)
-  assert.equal(settings.calls[1].command, 'list_audio_output_devices')
-})
-await test('failed system-default selection sends null and retains the last confirmed device', async () => {
-  const settings = await audioSettings()
-  const change = settings.change('')
-  assert.deepEqual(settings.calls[0], { command: 'set_audio_output_device', input: { name: null } })
-  settings.reject(new Error('device unavailable')); await change
-  assert.equal(settings.audioOutputDevice.value, 'headphones')
-  assert.equal(settings.audioOutputSwitching.value, false)
-  assert.deepEqual(settings.errors, ['settings.audio_output_failed'])
-  assert.equal(settings.calls[1].command, 'list_audio_output_devices')
-})
 console.log(`Custom select regressions: ${total - failed} passed, ${failed} failed`)
 if (failed) process.exitCode = 1

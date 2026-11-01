@@ -41,16 +41,8 @@ enum MediaSessionCmd {
     Stop,
 }
 
-/// 媒体事件回调类型
-#[derive(Debug, Clone)]
-pub enum MediaAction {
-    Play,
-    Pause,
-    Toggle,
-    Next,
-    Previous,
-    SeekTo(u64), // position_ms
-}
+/// 媒体事件回调类型（定义在 media_action.rs，三端共用）
+pub use super::media_action::MediaAction;
 
 impl MediaSessionController {
     /// 创建媒体会话控制器

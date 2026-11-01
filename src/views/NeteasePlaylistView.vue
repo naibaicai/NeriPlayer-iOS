@@ -273,9 +273,17 @@ function openTrackMenu(e: MouseEvent, track: TrackInfo) {
   }
   const btn = e.currentTarget as HTMLElement
   const rect = btn.getBoundingClientRect()
-  let x = rect.left - 204
-  if (x < 8) x = rect.right + 4
-  trackMenu.value = { show: true, x, y: rect.top, track }
+  // 菜单最小宽度 200px；窄屏（402pt）下按钮贴右边缘，直接 rect.right+4 会把菜单推出屏幕
+  const MENU_WIDTH = 204
+  const VIEWPORT_MARGIN = 8
+  let x = rect.left - MENU_WIDTH
+  if (x < VIEWPORT_MARGIN) x = rect.right + 4
+  const maxX = window.innerWidth - MENU_WIDTH - VIEWPORT_MARGIN
+  if (x > maxX) x = Math.max(VIEWPORT_MARGIN, maxX)
+  // 底部也要夹住，避免菜单超出可视区
+  const maxY = Math.max(VIEWPORT_MARGIN, window.innerHeight - 320)
+  const y = Math.min(rect.top, maxY)
+  trackMenu.value = { show: true, x, y, track }
 }
 
 function openTrackContextMenu(e: MouseEvent, track: TrackInfo) {
@@ -560,10 +568,11 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   color: var(--md-on-surface-variant);
-  opacity: 0;
+  /* 常显：隐藏态会让人以为整行不可点，触屏也无 hover 可言 */
+  opacity: 0.55;
   transition: opacity var(--duration-short), background var(--duration-short);
 
-  .track-item:hover & { opacity: 0.6; }
+  .track-item:hover & { opacity: 0.8; }
   &:hover { opacity: 1 !important; background: var(--md-surface-container-high); }
   .material-symbols-rounded { font-size: 18px; }
 }

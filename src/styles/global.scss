@@ -77,6 +77,19 @@ html.platform-mac {
   --titlebar-height: 52px;
 }
 
+/* iOS：没有窗口标题栏，也没有红绿灯。顶部安全区交给 safe-area-inset-top
+   （iPhone 18 Pro 实测 62px），不能再叠加 52px 的白耗 */
+html.platform-ios {
+  --titlebar-height: 0px;
+  /* 安全区已由 .app-layout 让过位，页面不再重复预留顶部内边距 */
+  --settings-pad-top: 8px;
+  /* 刘海/灵动岛安全区：由 .app-layout 消费 */
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  /* 底部横排导航条：内容高度 + Home 指示条安全区（实测 34px）
+     只写 64px 会把标签挤到安全区里，这就是底部文字压到边的主因 */
+  --side-nav-height: calc(56px + env(safe-area-inset-bottom, 0px));
+}
+
 /* 原生全屏时红绿灯随系统栏隐藏，内容无需继续预留较高的安全区 */
 html.platform-mac.window-fullscreen {
   --titlebar-height: 36px;
@@ -86,6 +99,21 @@ html.platform-mac.window-fullscreen {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+/* iOS WebView 会把整页做横向橡皮筋位移：手指斜着划列表时页面左右跟着动。
+   正文容器 overflow-x 已是 hidden，但 WebKit 仍允许 overscroll 平移，
+   这里在文档与正文两级都关掉横向 overscroll；纵向保留（下拉刷新式回弹）。
+   可横滑的 chip/tab 条各自在组件内恢复 pan-x。 */
+html, body {
+  overscroll-behavior-x: none;
+}
+
+/* iOS：禁掉长按选中与双击缩放，避免触屏误触系统菜单 */
+html.platform-ios {
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
 }
 
 html, body, #app {
@@ -169,8 +197,7 @@ button {
   background: none;
   cursor: pointer;
   color: inherit;
-  outline: none;
-  /* 兜底圆角：任何按钮在 hover/active 上色时都不会出现直角色块，
+  outline: none;  /* 兜底圆角：任何按钮在 hover/active 上色时都不会出现直角色块，
      组件自己声明 border-radius 时会自然覆盖这里 */
   border-radius: var(--radius-sm, 8px);
 }
@@ -192,6 +219,19 @@ a { color: inherit; text-decoration: none; }
 /* 输入类控件已有自己的 focus 边框高亮，避免双重描边 */
 :where(input, textarea, select):focus-visible {
   outline: none;
+}
+
+/* iOS/WKWebView 的自动放大：聚焦字号 < 16px 的输入控件时，
+   视口会被强制缩放（zoom），整页随之向右溢出、右缘被切。
+   viewport 里的 maximum-scale=1 自 iOS 10 起因无障碍原因被忽略，
+   所以只能从字号入手。仅 iOS 平台生效，桌面端保持原有紧凑字号。 */
+html.platform-ios {
+  input,
+  textarea,
+  select,
+  [contenteditable='true'] {
+    font-size: max(16px, 1em);
+  }
 }
 
 /* 数值编辑保留键盘步进，隐藏系统自带的微调按钮 */

@@ -1,6 +1,6 @@
 // 深色/浅色模式管理 + 圆形扩散过渡动画
 // 参考 Android 端 pending state 模式：视觉切换与持久化解耦，消除卡顿
-import { detectPlatform } from '@/modules/shortcuts/platform'
+import { detectPlatform } from '@/modules/platform'
 
 // WebKitGTK 的 View Transition 在 Linux 上不稳定（整页快照合成可致
 // WebKit 回调内 SEGV），走 beginSmoothThemeTransition 平滑降级

@@ -817,10 +817,24 @@ onMounted(() => {
   gap: 0;
   margin-bottom: 20px;
   border-bottom: 1px solid var(--md-outline-variant);
+  /* 窄屏音源多（网易/B站/YouTube/…），flex:1 会把文字挤断；改为可横滑 */
+  overflow-x: auto;
+  touch-action: pan-x;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  scroll-padding-inline: 2px;
+
+  &::-webkit-scrollbar { display: none; }
+
+  /* 子元素不压缩，否则 tab 会被挤成省略号而不是滚动 */
+  > * { flex: 0 0 auto; }
 }
 
 .platform-tab {
-  flex: 1;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  min-width: max-content;
   display: flex;
   align-items: center;
   justify-content: center;

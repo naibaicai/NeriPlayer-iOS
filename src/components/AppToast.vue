@@ -52,7 +52,11 @@ function onAction(msg: ToastMessage) {
 <style scoped>
 .toast-container {
   position: fixed;
-  bottom: 100px;
+  /* 抬到 MiniPlayer + 底部导航之上：原来的 100px 在手机竖屏会正好压在
+     MiniPlayer（76px）与导航条上，toast 把播放条和 Tab 一起盖住。
+     注意 --side-nav-height 在 iOS 上已含 safe-area-inset-bottom，
+     这里不能再叠一次，否则会多算 34px。 */
+  bottom: calc(var(--mini-player-height, 76px) + var(--side-nav-height, 0px) + 12px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 10000;
@@ -60,6 +64,18 @@ function onAction(msg: ToastMessage) {
   flex-direction: column-reverse;
   gap: 8px;
   pointer-events: none;
+}
+
+/* 播放页是全屏层：没有 MiniPlayer，也没有底部导航条。
+   沿用上面的高度会把 toast 顶到播放页中段，压住进度条与时间；
+   让 toast 沉到底部安全区上方即可。
+
+   定位依据必须是 body 上的 .np-open，而不是 .app-layout--now-playing：
+   本组件的容器经 <Teleport to="body"> 挂到 body 下，.app-layout 永远不是它的祖先，
+   任何写成「祖先 .app-layout--now-playing 里的 .toast-container」的规则都不会匹配，
+   只会静默失效（曾因此让 toast 一直压在进度条上）。 */
+body.np-open .toast-container {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
 }
 
 .toast-item {

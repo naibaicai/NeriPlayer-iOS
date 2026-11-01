@@ -50,7 +50,7 @@ import {
 } from '@/modules/lyrics/lyricsFetch'
 import { useCurrentLyricsStore } from '@/stores/currentLyrics'
 import { lyricSourceOf, rememberLyricSource } from '@/modules/lyrics/lyricSource'
-import { isEditableTarget, isMacPlatform } from '@/modules/shortcuts/platform'
+import { isEditableTarget, isMacPlatform } from '@/modules/platform'
 import {
   persistTrackSyncPayload,
   recordLyricOverride,
@@ -59,7 +59,6 @@ import {
 import { useLyricOffsetStore } from '@/stores/lyricOffset'
 import HyperBackground from './HyperBackground.vue'
 import CoverBlurBackground from './CoverBlurBackground.vue'
-import CommentsPanel from './CommentsPanel.vue'
 import { resolveCommentTarget } from '@/modules/playback/commentTarget'
 import BilibiliCoverImage from './BilibiliCoverImage.vue'
 import WaveformSlider from './WaveformSlider.vue'
@@ -87,8 +86,6 @@ import { getTrackCoverUrl } from '@/utils/trackCover'
 import { summarizeLogError } from '@/utils/logSanitizer'
 import { neteaseSongArtists } from '@/modules/library/artistNavigation'
 import { splitArtistNames } from '@/modules/library/localArtists'
-import { closeDesktopLyricsWindow, desktopLyricsOpen, openDesktopLyricsWindow } from '@/modules/desktopLyrics/bridge'
-import { normalizeDesktopLyricsStyle } from '@/modules/desktopLyrics/style'
 import { getPlaybackSourceKind } from '@/modules/playback/playbackSource'
 import { usePlaybackAudioInfoDisplay } from '@/composables/usePlaybackAudioInfoDisplay'
 import {
@@ -114,22 +111,9 @@ const downloadStore = useDownloadStore()
 const lyricOffsetStore = useLyricOffsetStore()
 const router = useRouter()
 const { t } = useI18n()
-async function toggleDesktopLyrics() {
-  try {
-    if (desktopLyricsOpen.value) {
-      await closeDesktopLyricsWindow()
-    } else {
-      await openDesktopLyricsWindow()
-      hideMoreSheet()
-    }
-  } catch (error) {
-    log.warn('desktop lyrics window failed:', summarizeLogError(error))
-    toast.error(t('player.desktop_lyrics_failed'))
-  }
-}
-
-function toggleDesktopLyricsLock() {
-  settings.desktopLyrics = normalizeDesktopLyricsStyle({ ...settings.desktopLyrics, locked: !settings.desktopLyrics.locked })
+function openCommentsPage() {
+  if (!player.currentTrack) return
+  void router.push({ name: 'comments' })
 }
 const playViewMode = ref<'cover' | 'lyrics'>('cover')
 const coverLoadError = ref(false)
@@ -141,7 +125,6 @@ const showBiliVideoSkip = ref(false)
 const biliVideoSkipTrack = ref<TrackInfo | null>(null)
 const canManageBiliVideoSkip = computed(() => !!player.currentTrack && !!resolveBiliVideoSkipBvid(player.currentTrack))
 const showAudioFxPanel = ref(false)
-const showComments = ref(false)
 const commentTarget = computed(() => resolveCommentTarget(player.currentTrack))
 const showSleepMenu = ref(false)
 const showMoreSheet = ref(false)
@@ -2100,9 +2083,22 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
           </span>
         </transition>
       </div>
-      <button v-if="player.hasPlaybackSession" class="np-icon-btn" @click="showMoreSheet = !showMoreSheet">
-        <span class="material-symbols-rounded">more_vert</span>
-      </button>
+      <div v-if="player.hasPlaybackSession" class="np-header-actions">
+        <!-- 单栏（竖向手机）下歌词/封面只能二选一，必须给个直接切换的按钮。
+             之前只能从「更多」菜单里翻，用户表现就是「歌词切不出来」。 -->
+        <button
+          class="np-icon-btn np-lyrics-toggle"
+          :aria-pressed="playViewMode === 'lyrics'"
+          :title="playViewMode === 'lyrics' ? t('player.cover') : t('settings.lyrics')"
+          :aria-label="playViewMode === 'lyrics' ? t('player.cover') : t('settings.lyrics')"
+          @click.stop="playViewMode = playViewMode === 'lyrics' ? 'cover' : 'lyrics'"
+        >
+          <span class="material-symbols-rounded">{{ playViewMode === 'lyrics' ? 'album' : 'lyrics' }}</span>
+        </button>
+        <button class="np-icon-btn" @click="showMoreSheet = !showMoreSheet">
+          <span class="material-symbols-rounded">more_vert</span>
+        </button>
+      </div>
       <span v-else class="np-header-spacer" aria-hidden="true" />
     </header>
 
@@ -2357,25 +2353,30 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
                 {{ formatSleepRemaining(player.sleepRemainingSeconds) }}
               </span>
             </button>
-            <Transition name="np-popover">
-            <div v-if="showSleepMenu" class="sleep-popover np-floating-popover np-floating-popover--menu">
-              <button
-                v-for="opt in sleepOptions"
-                :key="opt.value"
-                class="sleep-option"
-                @click="handleSleepOption(opt.value); showSleepMenu = false"
-              >
-                {{ opt.label }}
-              </button>
-              <button
-                v-if="player.sleepTimerMode"
-                class="sleep-option cancel"
-                @click="player.cancelSleepTimer(); showSleepMenu = false"
-              >
-                {{ t('player.sleep_off') }}
-              </button>
+            <Teleport to="body">
+            <Transition name="np-drawer">
+            <div v-if="showSleepMenu" class="np-drawer-scrim" @click="showSleepMenu = false">
+              <div class="np-drawer" @click.stop>
+                <div class="np-drawer-handle" aria-hidden="true" />
+                <button
+                  v-for="opt in sleepOptions"
+                  :key="opt.value"
+                  class="np-drawer-item"
+                  @click="handleSleepOption(opt.value); showSleepMenu = false"
+                >
+                  {{ opt.label }}
+                </button>
+                <button
+                  v-if="player.sleepTimerMode"
+                  class="np-drawer-item np-drawer-item--danger"
+                  @click="player.cancelSleepTimer(); showSleepMenu = false"
+                >
+                  {{ t('player.sleep_off') }}
+                </button>
+              </div>
             </div>
             </Transition>
+            </Teleport>
           </div>
           <div class="volume-wrap">
             <button
@@ -2388,8 +2389,13 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
             >
               <span class="material-symbols-rounded">{{ player.volume === 0 ? 'volume_off' : player.volume < 0.5 ? 'volume_down' : 'volume_up' }}</span>
             </button>
-            <Transition name="np-popover">
-            <div v-if="showVolumeSlider" class="volume-popover np-floating-popover np-floating-popover--volume">
+            <Teleport to="body">
+            <Transition name="np-drawer">
+            <div v-if="showVolumeSlider" class="np-drawer-scrim" @click="showVolumeSlider = false">
+              <div class="np-drawer" @click.stop>
+                <div class="np-drawer-handle" aria-hidden="true" />
+                <div class="np-drawer-title">{{ t('player.volume') }}</div>
+                <div class="np-drawer-volume">
               <input
                 type="range"
                 min="0"
@@ -2413,8 +2419,11 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
                 :aria-label="t('player.volume')"
                 @update:model-value="player.setVolume($event)"
               />
+                </div>
+              </div>
             </div>
             </Transition>
+            </Teleport>
           </div>
           <!-- 音效 (AudioFX) -->
           <div class="speed-wrap">
@@ -2427,11 +2436,17 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
             >
               <span class="material-symbols-rounded">tune</span>
             </button>
-            <Transition name="np-popover">
-              <div v-if="showAudioFxPanel" class="audiofx-popover np-floating-popover np-floating-popover--audiofx">
-                <AudioEffectsPanel @details="openAudioEffectsSettings" />
+            <Teleport to="body">
+            <Transition name="np-drawer">
+              <div v-if="showAudioFxPanel" class="np-drawer-scrim" @click="showAudioFxPanel = false">
+                <div class="np-drawer np-drawer--tall" @click.stop>
+                  <div class="np-drawer-handle" aria-hidden="true" />
+                  <div class="np-drawer-title">{{ t('player.audio_effects') }}</div>
+                  <AudioEffectsPanel @details="openAudioEffectsSettings" />
+                </div>
               </div>
             </Transition>
+            </Teleport>
           </div>
           <button
             class="tool-btn tool-btn--feedback"
@@ -2445,10 +2460,10 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
           <button
             v-if="commentTarget"
             class="tool-btn tool-btn--feedback"
-            :class="{ active: showComments }"
+
             :title="t('player.comments')"
             :aria-label="t('player.comments')"
-            @click="triggerControlFeedbackPulse(); closeToolbarPopovers(); showComments = true"
+            @click="triggerControlFeedbackPulse(); closeToolbarPopovers(); openCommentsPage()"
           >
             <span class="material-symbols-rounded">chat_bubble</span>
           </button>
@@ -2487,7 +2502,6 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
     </Teleport>
     <AddToPlaylistDialog v-if="player.hasPlaybackSession" v-model:open="showAddToPlaylist" :track="player.currentTrack" />
     <BiliVideoSkipDialog v-model:open="showBiliVideoSkip" :track="biliVideoSkipTrack" />
-    <CommentsPanel v-model:open="showComments" :track="player.currentTrack" />
     <ListenTogetherPanel v-if="player.hasPlaybackSession" v-model:open="showLtPanel" />
 
     <!-- 更多选项面板（对齐 Android MoreOptionsSheet） -->
@@ -2519,7 +2533,7 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
                 </div>
                 <span class="material-symbols-rounded np-more-chevron">chevron_right</span>
               </button>
-              <button v-if="commentTarget" class="np-more-list-item" @click="showMoreSheet = false; showComments = true">
+              <button v-if="commentTarget" class="np-more-list-item" @click="showMoreSheet = false; openCommentsPage()">
                 <span class="material-symbols-rounded">chat_bubble</span>
                 <div class="np-more-list-info">
                   <span class="np-more-list-headline">{{ t('player.comments') }}</span>
@@ -2604,17 +2618,10 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
                   </button>
                 </div>
               </div>
-              <button class="np-more-list-item" :class="{ active: desktopLyricsOpen }" @click="toggleDesktopLyrics">
-                <span class="material-symbols-rounded">picture_in_picture_alt</span>
+              <button class="np-more-list-item" @click="playViewMode = playViewMode === 'lyrics' ? 'cover' : 'lyrics'; hideMoreSheet()">
+                <span class="material-symbols-rounded">{{ playViewMode === 'lyrics' ? 'album' : 'lyrics' }}</span>
                 <div class="np-more-list-info">
-                  <span class="np-more-list-headline">{{ t('player.desktop_lyrics') }}</span>
-                </div>
-                <span v-if="desktopLyricsOpen" class="material-symbols-rounded np-more-list-check">check</span>
-              </button>
-              <button v-if="desktopLyricsOpen" class="np-more-list-item" @click="toggleDesktopLyricsLock">
-                <span class="material-symbols-rounded">{{ settings.desktopLyrics.locked ? 'lock' : 'lock_open' }}</span>
-                <div class="np-more-list-info">
-                  <span class="np-more-list-headline">{{ t(settings.desktopLyrics.locked ? 'desktop_lyrics.unlock' : 'desktop_lyrics.lock') }}</span>
+                  <span class="np-more-list-headline">{{ playViewMode === 'lyrics' ? t('player.cover') : t('settings.lyrics') }}</span>
                 </div>
               </button>
               <button class="np-more-list-item" @click="openLyricsFill">
@@ -3270,7 +3277,10 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
   z-index: 2;
   display: flex;
   align-items: center;
-  padding: calc(var(--titlebar-height, 36px) + 8px) 24px 14px; /* 顶栏高度 + 8px 间距 */
+  /* 顶栏高度 + 8px 间距。iOS 的 --titlebar-height 为 0，必须再叠 safe-area-top，
+     否则 .now-playing 是 fixed/inset:0 的独立层、不继承 .app-layout 的让位，
+     顶栏整条会钻到状态栏与灵动岛下面（收起箭头/歌词/更多全部点不到）。 */
+  padding: calc(var(--titlebar-height, 36px) + var(--safe-area-top, 0px) + 8px) 24px 14px;
   gap: 12px;
   flex-shrink: 0;
   transition: transform 380ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease;
@@ -3323,8 +3333,33 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
   color: rgba(255,255,255,0.92);
   transition: background 150ms, color 220ms ease;
 
-  &:hover { background: rgba(255,255,255,0.12); }
+  /* 触屏上 hover 会黏住：点击后高亮一直不退，看起来像按钮卡在按下态。
+     统一去掉 hover 底色，只保留 :active 的即时反馈与键盘 focus-visible。 */
+  &:active { background: rgba(255,255,255,0.10); }
   .material-symbols-rounded { font-size: 28px; }
+}
+
+.np-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* 歌词/封面直接切换：双栏（≥641px）两栏同屏可见，这个按钮没有意义，
+   只在单栏（竖向手机）出现。 */
+.np-lyrics-toggle {
+  display: none;
+
+  @media (max-width: 640px) {
+    display: flex;
+  }
+
+  /* 处于歌词态时点亮，与触摸反馈区分 */
+  &[aria-pressed='true'] {
+    background: rgba(255,255,255,0.16);
+    color: #fff;
+  }
 }
 
 /* 双栏主体：五五分 */
@@ -3378,6 +3413,42 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
       flex: 1 1 54%;
       padding: 8px 48px 16px 16px;
     }
+  }
+}
+
+/* 矮视口（横屏 iPhone：总高 402pt）：竖排 stack 里封面 + 标题 + 进度 + 控制 + 工具栏
+   叠加后超出可用高度，.np-left 的居中 + overflow:hidden 会把封面上下裁掉。
+   这里让封面只吃「扣掉固定行高后的剩余高度」，横向宽度交给 flex，
+   并在左右并排时缩小上下内边距。 */
+@media (max-height: 500px) {
+  .np-body.np-body--cover-mode .np-left {
+    padding: 6px 16px 8px 20px;
+  }
+
+  .cover-wrap {
+    width: min(100%, 220px, 52vh);
+  }
+
+  .np-left-stack {
+    gap: 6px;
+    max-width: 300px;
+  }
+
+  .np-info {
+    height: 44px;
+  }
+
+  .np-slider-area {
+    min-height: 64px;
+    padding-top: 4px;
+  }
+
+  .np-controls {
+    margin-top: 0;
+  }
+
+  .np-toolbar {
+    margin-top: 0;
   }
 }
 
@@ -3440,6 +3511,47 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
   overflow: hidden;
   padding: 0 40px 8px 8px;
   transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 280ms ease, filter 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ── 竖屏 / 窄屏：封面与歌词不能共存 ────────────────────────────────────
+   402pt 宽下两栏并列，封面被压成 180pt、歌词被压成三条竖排字，两边都不可用。
+   改为单栏互斥：默认封面，点顶栏按钮切到歌词；两栏各占满宽度。
+   桌面（≥641px）仍保留双栏。 */
+@media (max-width: 640px) {
+  .np-body {
+    &.np-body--cover-mode,
+    &.np-body--lyrics-mode {
+      .np-left {
+        flex: 1 1 100%;
+        max-width: none;
+        padding: 8px 20px 12px;
+        justify-content: center;
+      }
+
+      .np-right {
+        padding: 0 16px 8px;
+      }
+    }
+
+    /* 封面模式：歌词栏整栏退出布局，不只是 opacity:0（否则仍占 54% 宽） */
+    &.np-body--cover-mode .np-right {
+      display: none;
+    }
+
+    /* 歌词模式：封面栏整栏退出布局 */
+    &.np-body--lyrics-mode .np-left {
+      display: none;
+    }
+  }
+
+  /* 单栏下封面不必再为双栏让位，可以大一些 */
+  .cover-wrap {
+    width: min(100%, 300px, 42vh);
+  }
+
+  .np-left-stack {
+    max-width: 340px;
+  }
 }
 
 /* 封面：全屏时更大更稳 */
@@ -3833,9 +3945,9 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
   overflow: hidden;
   transition: color 150ms, background 150ms, transform 180ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1);
 
-  &:hover { background: rgba(255,255,255,0.10); color: rgba(255,255,255,0.95); }
   &.active { color: var(--np-primary, white); }
   &:active { transform: scale(0.9); }
+  &:focus-visible { outline: 2px solid rgba(255,255,255,0.55); outline-offset: 2px; }
 }
 
 .ctrl-btn--transport {
@@ -3882,13 +3994,11 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
     pointer-events: none;
   }
 
-  &:hover::after,
   &:focus-visible::after {
     --transport-ring-opacity: 0.44;
     --transport-ring-scale: 1;
   }
 
-  &:hover::before,
   &:focus-visible::before {
     --transport-glow-opacity: 0.48;
     --transport-glow-shift: 0px;
@@ -3918,10 +4028,6 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
   position: relative;
   isolation: isolate;
 
-  &:hover {
-    transform: scale(1.05);
-    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
-  }
   &:active { transform: scale(0.94); }
 }
 
@@ -4121,6 +4227,108 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
   transform: translateX(-50%) translateY(10px) scale(0.94);
 }
 
+/* ── 底部抽屉（移动端统一交互）───────────────────────────────────────────
+   播放页底部工具条的弹窗原来都是贴着按钮的小气泡；402pt 宽度下会被裁切、
+   也点不准。统一改为从底部升起、带遮罩的抽屉。 */
+.np-drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.np-drawer {
+  width: 100%;
+  max-width: 560px;
+  max-height: 82vh;
+  overflow-y: auto;
+  scrollbar-width: none;
+  background: rgba(30, 28, 34, 0.96);
+  backdrop-filter: blur(28px) saturate(1.12);
+  -webkit-backdrop-filter: blur(28px) saturate(1.12);
+  border-radius: 22px 22px 0 0;
+  padding: 10px 16px calc(env(safe-area-inset-bottom, 0px) + 20px);
+  color: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.5);
+
+  &::-webkit-scrollbar { display: none; }
+}
+
+.np-drawer--tall { max-height: 88vh; }
+
+/* 顶部拖动条，明确的「可下拉关闭」暗示 */
+.np-drawer-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.28);
+  margin: 4px auto 12px;
+}
+
+.np-drawer-title {
+  font-size: 15px;
+  font-weight: 600;
+  padding: 0 4px 10px;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.np-drawer-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 15px 8px;
+  font-size: 15px;
+  text-align: left;
+  color: rgba(255, 255, 255, 0.9);
+  border-radius: 12px;
+  transition: background 150ms;
+
+  &:active { background: rgba(255, 255, 255, 0.08); }
+}
+
+.np-drawer-item--danger { color: #ff8a80; }
+
+.np-drawer-volume {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 8px 4px;
+
+  .volume-slider {
+    flex: 1;
+    width: auto;
+    transform: none;
+  }
+}
+
+/* 抽屉升降动画 */
+.np-drawer-enter-active,
+.np-drawer-leave-active {
+  transition: opacity 220ms ease;
+}
+.np-drawer-enter-active .np-drawer,
+.np-drawer-leave-active .np-drawer {
+  transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.np-drawer-enter-from,
+.np-drawer-leave-to {
+  opacity: 0;
+}
+.np-drawer-enter-from .np-drawer,
+.np-drawer-leave-to .np-drawer {
+  transform: translateY(100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .np-drawer-enter-active .np-drawer,
+  .np-drawer-leave-active .np-drawer { transition: none; }
+}
+
 @keyframes np-toolbar-breathe {
   0% {
     opacity: 0.6;
@@ -4300,7 +4508,7 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
 
   .material-symbols-rounded { font-size: 20px; }
 
-  &:hover { background: rgba(255,255,255,0.10); color: rgba(255,255,255,0.87); }
+  &:active { background: rgba(255,255,255,0.10); color: rgba(255,255,255,0.87); }
   &.active { color: var(--np-primary, var(--md-primary-container, #E8DEF8)); }
   &.disabled { opacity: 0.38; cursor: default; }
   &:disabled { opacity: 0.38; cursor: default; }
@@ -4319,7 +4527,6 @@ const sliderActiveColor = computed(() => dynamicColorVars.value['--np-primary'] 
   transition: opacity 200ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.tool-btn--feedback:hover::after,
 .tool-btn--feedback:focus-visible::after {
   opacity: 1;
   transform: scale(1);

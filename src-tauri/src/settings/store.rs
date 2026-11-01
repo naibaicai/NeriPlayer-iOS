@@ -112,7 +112,6 @@ pub struct AppSettings {
     pub youtube_playback_source: String,
     pub netease_auto_source_switch: bool,
     pub netease_local_source_fallback: bool,
-    pub bypass_proxy: bool,
     pub internationalization_enabled: bool,
     /// 探索页显示并记录搜索关键词（对齐 Android explore_search_history_enabled）
     pub explore_search_history_enabled: bool,
@@ -147,7 +146,6 @@ pub struct AppSettings {
     pub lt_auto_pause_on_member_change: bool,
     pub lt_share_audio_links: bool,
     pub volume: f32,
-    pub audio_output_device: String,
     pub playback_speed: f32,
     pub playback_pitch: f32,
     pub vinyl_effect_enabled: bool,
@@ -164,15 +162,9 @@ pub struct AppSettings {
     pub desktop_lyrics: serde_json::Value,
     /// macOS 菜单栏歌词独立于桌面歌词窗口，默认关闭以免占用菜单栏空间
     pub show_menu_bar_lyrics: bool,
-    /// 快捷键改键：{ local: {动作: 组合键}, global: {...} }，只存与默认不同的项，
-    /// 逐项规整在前端 normalizeShortcutBindings；这里只保证是对象且不过大
-    pub shortcut_bindings: serde_json::Value,
-    /// 系统级全局快捷键（窗口不在前台也生效）总开关，默认关闭以免抢占其它程序的热键
-    pub global_shortcuts_enabled: bool,
 }
 
 const MAX_DESKTOP_LYRICS_STYLE_BYTES: usize = 16 * 1024;
-const MAX_SHORTCUT_BINDINGS_BYTES: usize = 8 * 1024;
 
 fn legacy_audio_effects_settings() -> AudioEffectsSettings {
     AudioEffectsSettings { version: 0, ..AudioEffectsSettings::default() }
@@ -269,7 +261,6 @@ impl Default for AppSettings {
             youtube_playback_source: "automatic".into(),
             netease_auto_source_switch: false,
             netease_local_source_fallback: false,
-            bypass_proxy: true,
             internationalization_enabled: false,
             explore_search_history_enabled: true,
             background_image_uri: String::new(),
@@ -298,7 +289,6 @@ impl Default for AppSettings {
             lt_auto_pause_on_member_change: true,
             lt_share_audio_links: true,
             volume: 1.0,
-            audio_output_device: String::new(),
             playback_speed: 1.0,
             playback_pitch: 1.0,
             vinyl_effect_enabled: false,
@@ -309,8 +299,6 @@ impl Default for AppSettings {
             equalizer_bands: vec![0; EQUALIZER_BAND_COUNT],
             desktop_lyrics: serde_json::Value::Object(serde_json::Map::new()),
             show_menu_bar_lyrics: false,
-            shortcut_bindings: serde_json::Value::Object(serde_json::Map::new()),
-            global_shortcuts_enabled: false,
         }
     }
 }
@@ -390,10 +378,6 @@ impl AppSettings {
         let style_bytes = serde_json::to_vec(&self.desktop_lyrics).map_or(usize::MAX, |bytes| bytes.len());
         if !self.desktop_lyrics.is_object() || style_bytes > MAX_DESKTOP_LYRICS_STYLE_BYTES {
             self.desktop_lyrics = serde_json::Value::Object(serde_json::Map::new());
-        }
-        let bindings_bytes = serde_json::to_vec(&self.shortcut_bindings).map_or(usize::MAX, |bytes| bytes.len());
-        if !self.shortcut_bindings.is_object() || bindings_bytes > MAX_SHORTCUT_BINDINGS_BYTES {
-            self.shortcut_bindings = serde_json::Value::Object(serde_json::Map::new());
         }
 
         if self.netease_quality.trim() == "high" {
@@ -487,7 +471,6 @@ impl AppSettings {
             DEFAULT_DOWNLOAD_NAME_TEMPLATE,
         );
         self.download_dir = self.download_dir.trim().into();
-        self.audio_output_device = self.audio_output_device.trim().into();
         self.lt_server_url = self.lt_server_url.trim().trim_end_matches('/').into();
         self.lt_nickname = self.lt_nickname.trim().into();
 
@@ -906,17 +889,6 @@ mod tests {
             settings.normalize();
             assert_eq!(settings.download_netease_quality, "higher");
         }
-    }
-
-    #[test]
-    fn android_alignment_output_device_settings_are_backward_compatible() {
-        let mut settings: AppSettings = serde_json::from_str("{}").expect("old settings");
-        assert_eq!(settings.audio_output_device, "");
-        settings.audio_output_device = "  Headphones  ".into();
-        settings.normalize();
-        assert_eq!(settings.audio_output_device, "Headphones");
-        let json = serde_json::to_value(&settings).expect("settings");
-        assert_eq!(json["audioOutputDevice"], "Headphones");
     }
 
     use super::{AppSettings, MAX_MEDIA_CACHE_SIZE_MB, MIN_MEDIA_CACHE_SIZE_MB};

@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { UnlistenFn } from '@tauri-apps/api/event'
-import { isMacPlatform } from '@/modules/shortcuts/platform'
+import { isIosPlatform, isMacPlatform } from '@/modules/platform'
 
 const props = defineProps<{
   forceLight?: boolean
@@ -35,6 +35,8 @@ let unlistenResize: UnlistenFn | null = null
 let disposed = false
 let windowStateVersion = 0
 
+// iOS 没有窗口标题栏，也不存在窗口控制；顶栏整体不渲染（NowPlaying 自带返回按钮）
+const isIos = isIosPlatform
 // macOS 使用系统原生红绿灯，隐藏自绘控制并在左侧留出安全区
 const isMac = isMacPlatform
 /** 拖动改变窗口大小时 resize 事件一秒几十次，窗口状态等停下来再查 */
@@ -96,6 +98,7 @@ onUnmounted(() => {
 
 <template>
   <header
+    v-if="!isIos"
     class="title-bar"
     :class="{
       'tb-force-light': forceLight,

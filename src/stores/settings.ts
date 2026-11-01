@@ -1,9 +1,8 @@
+import { sanitizeFontFamily } from '@/modules/settings/fonts'
 import { defineStore } from 'pinia'
 import { ref, watch, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { createLogger } from '@/utils/logger'
-import { normalizeDesktopLyricsStyle, sanitizeFontFamily, type DesktopLyricsStyle } from '@/modules/desktopLyrics/style'
-import { normalizeShortcutBindings, type ShortcutBindings } from '@/modules/shortcuts/bindings'
 import { migrateLegacyAudioEffects, normalizeAudioEffectsSettings, type AudioEffectsSettings } from '@/modules/audioEffects/model'
 
 const log = createLogger('settings')
@@ -30,9 +29,6 @@ export interface AppSettings {
   lyricFontFamily: string
   locale: string
   defaultScreen: string
-  /** 关闭主窗口时收进托盘继续播放；关掉后关闭即退出 */
-  closeToTray: boolean
-  showMenuBarLyrics: boolean
   showCoverBadge: boolean
   showNowPlayingTitle: boolean
   showToolbarDock: boolean
@@ -88,7 +84,6 @@ export interface AppSettings {
   youtubePlaybackSource: YouTubePlaybackSource
   neteaseAutoSourceSwitch: boolean
   neteaseLocalSourceFallback: boolean
-  bypassProxy: boolean
   internationalizationEnabled: boolean
   exploreSearchHistoryEnabled: boolean
   backgroundImageUri: string
@@ -120,7 +115,6 @@ export interface AppSettings {
   ltAutoPauseOnMemberChange: boolean
   ltShareAudioLinks: boolean
   volume: number
-  audioOutputDevice: string
   playbackSpeed: number
   playbackPitch: number
   vinylEffectEnabled: boolean
@@ -129,11 +123,6 @@ export interface AppSettings {
   equalizerEnabled: boolean
   equalizerPresetId: string
   equalizerBands: number[]
-  desktopLyrics: DesktopLyricsStyle
-  /** 快捷键改键，只存与默认不同的项 */
-  shortcutBindings: ShortcutBindings
-  /** 系统级全局快捷键总开关 */
-  globalShortcutsEnabled: boolean
 }
 
 interface SettingsLoadResult {
@@ -183,7 +172,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   lyricFontFamily: '',
   locale: detectLocale(),
   defaultScreen: 'home',
-  closeToTray: true,
   showCoverBadge: true,
   showNowPlayingTitle: true,
   showToolbarDock: true,
@@ -236,7 +224,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   youtubePlaybackSource: 'automatic',
   neteaseAutoSourceSwitch: false,
   neteaseLocalSourceFallback: false,
-  bypassProxy: true,
   internationalizationEnabled: false,
   exploreSearchHistoryEnabled: true,
   backgroundImageUri: '',
@@ -265,7 +252,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   ltAutoPauseOnMemberChange: true,
   ltShareAudioLinks: true,
   volume: 1,
-  audioOutputDevice: '',
   playbackSpeed: 1,
   playbackPitch: 1,
   vinylEffectEnabled: false,
@@ -274,10 +260,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   equalizerEnabled: false,
   equalizerPresetId: 'flat',
   equalizerBands: [0, 0, 0, 0, 0],
-  desktopLyrics: normalizeDesktopLyricsStyle(null),
-  showMenuBarLyrics: false,
-  shortcutBindings: { local: {}, global: {} },
-  globalShortcutsEnabled: false,
 }
 
 const LEGACY_KEYS: Partial<Record<SettingKey, string>> = {
@@ -312,7 +294,6 @@ const LEGACY_KEYS: Partial<Record<SettingKey, string>> = {
   lyricBlur: 'lyric_blur',
   lyricBlurAmount: 'lyric_blur_amount',
   lyricEmphasisThresholdMs: 'lyric_emphasis_threshold_ms',
-  desktopLyrics: 'desktop_lyrics',
   cloudMusicOffset: 'cloud_offset',
   qqMusicOffset: 'qq_offset',
   coverStyle: 'cover_style',
@@ -329,7 +310,6 @@ const LEGACY_KEYS: Partial<Record<SettingKey, string>> = {
   youtubePlaybackSource: 'youtube_playback_source',
   neteaseAutoSourceSwitch: 'netease_auto_source_switch',
   neteaseLocalSourceFallback: 'netease_local_source_fallback',
-  bypassProxy: 'bypass_proxy',
   internationalizationEnabled: 'intl_enabled',
   backgroundImageUri: 'bg_image_uri',
   backgroundImageBlur: 'bg_image_blur',
@@ -513,7 +493,6 @@ function normalizeSnapshot(input: unknown): AppSettings {
     MAX_MEDIA_CACHE_SIZE_MB,
   )
   result.volume = clamp(result.volume, 0, 1)
-  result.audioOutputDevice = result.audioOutputDevice.trim()
   result.playbackSpeed = normalizePlaybackSpeed(result.playbackSpeed)
   result.playbackPitch = normalizePlaybackPitch(result.playbackPitch)
   result.loudnessGainMb = clamp(Math.round(result.loudnessGainMb), 0, 1500)
@@ -526,8 +505,6 @@ function normalizeSnapshot(input: unknown): AppSettings {
     : normalizeAudioEffectsSettings(source.audioEffects)
   // 旧 EQ 已转入 native DSP，关闭旧开关避免两套滤波器叠加
   result.equalizerEnabled = false
-  result.desktopLyrics = normalizeDesktopLyricsStyle(result.desktopLyrics)
-  result.shortcutBindings = normalizeShortcutBindings(result.shortcutBindings)
   return result
 }
 
@@ -616,7 +593,6 @@ export const useSettingsStore = defineStore('settings', () => {
   const lyricFontFamily = ref(initial.lyricFontFamily)
   const locale = ref(initial.locale)
   const defaultScreen = ref(initial.defaultScreen)
-  const closeToTray = ref(initial.closeToTray)
   const showCoverBadge = ref(initial.showCoverBadge)
   const showNowPlayingTitle = ref(initial.showNowPlayingTitle)
   const showToolbarDock = ref(initial.showToolbarDock)
@@ -669,7 +645,6 @@ export const useSettingsStore = defineStore('settings', () => {
   const youtubePlaybackSource = ref(initial.youtubePlaybackSource)
   const neteaseAutoSourceSwitch = ref(initial.neteaseAutoSourceSwitch)
   const neteaseLocalSourceFallback = ref(initial.neteaseLocalSourceFallback)
-  const bypassProxy = ref(initial.bypassProxy)
   const internationalizationEnabled = ref(initial.internationalizationEnabled)
   const exploreSearchHistoryEnabled = ref(initial.exploreSearchHistoryEnabled)
   const backgroundImageUri = ref(initial.backgroundImageUri)
@@ -698,7 +673,6 @@ export const useSettingsStore = defineStore('settings', () => {
   const ltAutoPauseOnMemberChange = ref(initial.ltAutoPauseOnMemberChange)
   const ltShareAudioLinks = ref(initial.ltShareAudioLinks)
   const volume = ref(initial.volume)
-  const audioOutputDevice = ref(initial.audioOutputDevice)
   const playbackSpeed = ref(initial.playbackSpeed)
   const playbackPitch = ref(initial.playbackPitch)
   const vinylEffectEnabled = ref(initial.vinylEffectEnabled)
@@ -707,13 +681,9 @@ export const useSettingsStore = defineStore('settings', () => {
   const equalizerEnabled = ref(initial.equalizerEnabled)
   const equalizerPresetId = ref(initial.equalizerPresetId)
   const equalizerBands = ref([...initial.equalizerBands])
-  const desktopLyrics = ref<DesktopLyricsStyle>(initial.desktopLyrics)
-  const showMenuBarLyrics = ref(initial.showMenuBarLyrics)
-  const shortcutBindings = ref<ShortcutBindings>(initial.shortcutBindings)
-  const globalShortcutsEnabled = ref(initial.globalShortcutsEnabled)
 
   const settingRefs: SettingRefs = {
-    darkMode, themeColor, appFontFamily, lyricFontFamily, locale, defaultScreen, closeToTray, showCoverBadge,
+    darkMode, themeColor, appFontFamily, lyricFontFamily, locale, defaultScreen, showCoverBadge,
     showNowPlayingTitle, showToolbarDock, showQualitySwitch, showAudioCodec,
     showAudioSpec, lyricFontScale, crossfade, normalizeVolume, multichannelDrc, volumeBalance, fadeIn,
     showAudioBitrate, showAudioFormat, showAudioChannels, showAudioSampleRate, showAudioBitDepth,
@@ -723,7 +693,7 @@ export const useSettingsStore = defineStore('settings', () => {
     amllTtmlOffset, coverStyle,
     advancedLyrics, preferWordTimedLyrics, defaultLyricSource, dynamicBackground, colorMode, audioReactive, coverBlurBg,
     coverBlurAmount, coverBlurDarken, neteaseQuality, qqMusicQuality,
-    youtubeQuality, biliQuality, bypassProxy, internationalizationEnabled, exploreSearchHistoryEnabled,
+    youtubeQuality, biliQuality, internationalizationEnabled, exploreSearchHistoryEnabled,
     youtubePlaybackSource, neteaseAutoSourceSwitch, neteaseLocalSourceFallback,
     backgroundImageUri, backgroundImageBlur, backgroundImageAlpha, backgroundImageDim, enhancedAdvancedBlur,
     enhancedAdvancedBlurRadius, devModeEnabled,
@@ -732,9 +702,9 @@ export const useSettingsStore = defineStore('settings', () => {
     downloadParallelism, downloadAutoFillMetadata, downloadEmbedLyrics,
     downloadFollowPlaybackQuality, downloadNeteaseQuality, downloadQqMusicQuality,
     downloadYoutubeQuality, downloadBiliQuality,
-    ltAllowMemberControl, ltAutoPauseOnMemberChange, ltShareAudioLinks, volume, audioOutputDevice,
+    ltAllowMemberControl, ltAutoPauseOnMemberChange, ltShareAudioLinks, volume,
     playbackSpeed, playbackPitch, vinylEffectEnabled, audioEffects, loudnessGainMb, equalizerEnabled, equalizerPresetId,
-    equalizerBands, desktopLyrics, showMenuBarLyrics, shortcutBindings, globalShortcutsEnabled,
+    equalizerBands,
   }
 
   const isHydrated = ref(false)
@@ -811,7 +781,7 @@ export const useSettingsStore = defineStore('settings', () => {
   return {
     isHydrated, hydrate, snapshot, applySnapshot,
     darkMode, themeColor, appFontFamily, lyricFontFamily, locale, coverStyle,
-    defaultScreen, closeToTray, showCoverBadge, showNowPlayingTitle, showToolbarDock,
+    defaultScreen, showCoverBadge, showNowPlayingTitle, showToolbarDock,
     showQualitySwitch, showAudioCodec, showAudioSpec, lyricFontScale,
     showAudioBitrate, showAudioFormat, showAudioChannels, showAudioSampleRate, showAudioBitDepth,
     crossfade, normalizeVolume, multichannelDrc, volumeBalance, fadeIn, fadeInDuration, fadeOutDuration,
@@ -821,7 +791,7 @@ export const useSettingsStore = defineStore('settings', () => {
     cloudMusicOffset, qqMusicOffset, kugouOffset, lrclibOffset, amllTtmlOffset,
     advancedLyrics, preferWordTimedLyrics, defaultLyricSource, dynamicBackground,
     colorMode, audioReactive, coverBlurBg, coverBlurAmount, coverBlurDarken,
-    neteaseQuality, qqMusicQuality, youtubeQuality, biliQuality, bypassProxy,
+    neteaseQuality, qqMusicQuality, youtubeQuality, biliQuality,
     youtubePlaybackSource, neteaseAutoSourceSwitch, neteaseLocalSourceFallback,
     internationalizationEnabled, exploreSearchHistoryEnabled, backgroundImageUri, backgroundImageBlur,
     backgroundImageAlpha, backgroundImageDim, enhancedAdvancedBlur, enhancedAdvancedBlurRadius,
@@ -830,8 +800,8 @@ export const useSettingsStore = defineStore('settings', () => {
     downloadParallelism, downloadAutoFillMetadata, downloadEmbedLyrics,
     downloadFollowPlaybackQuality, downloadNeteaseQuality, downloadQqMusicQuality,
     downloadYoutubeQuality, downloadBiliQuality,
-    ltAutoPauseOnMemberChange, ltShareAudioLinks, volume, audioOutputDevice, playbackSpeed, playbackPitch, vinylEffectEnabled, audioEffects,
-    loudnessGainMb, equalizerEnabled, equalizerPresetId, equalizerBands, desktopLyrics, showMenuBarLyrics,
-    shortcutBindings, globalShortcutsEnabled,
+    ltAutoPauseOnMemberChange, ltShareAudioLinks, volume, playbackSpeed, playbackPitch, vinylEffectEnabled, audioEffects,
+    loudnessGainMb, equalizerEnabled, equalizerPresetId, equalizerBands,
+
   }
 })

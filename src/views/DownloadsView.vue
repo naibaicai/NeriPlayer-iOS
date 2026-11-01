@@ -841,7 +841,8 @@ function progressWidth(task: ActiveDownloadTask) {
   display: flex;
   align-items: center;
   gap: 2px;
-  opacity: 0;
+  /* 常显：隐藏态仍可点中，会把行内其它点击吞掉（触屏没 hover 可唤醒） */
+  opacity: 0.6;
   transition: opacity var(--duration-short);
   flex-shrink: 0;
 

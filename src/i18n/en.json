@@ -992,11 +992,6 @@
     "clear_confirm_btn": "Clear"
   },
   "settings": {
-    "audio_output": "Audio output device",
-    "audio_output_default": "Follow system default",
-    "audio_output_desc": "Keep your position when switching devices and follow system changes with the default option",
-    "audio_output_unavailable": "{name} (disconnected)",
-    "audio_output_failed": "Could not switch audio output device",
     "title": "Settings",
     "accounts": "Accounts",
     "nav_accounts_desc": "Manage platform sign-ins and access",
@@ -1363,9 +1358,6 @@
     "ffmpeg_component_unavailable": "Not loaded, so Opus, E-AC-3 and similar formats can't play right now",
     "network": "Network",
     "nav_network_desc": "Configure network connections",
-    "bypass_proxy": "Bypass Proxy",
-    "bypass_proxy_desc": "Bypass system proxy for direct connection, useful when proxy causes issues",
-    "bypass_proxy_failed": "Couldn't switch the proxy mode, so the previous setting was kept",
     "download_manage": "Download Management",
     "download_progress": "{completed}/{total} completed",
     "cancel_all_downloads": "Cancel All",

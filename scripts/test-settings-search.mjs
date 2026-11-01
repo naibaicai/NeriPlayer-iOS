@@ -47,20 +47,11 @@ const searchStatement = parsed.statements.find(statement => ts.isVariableStateme
 const searchCompiled = ts.transpileModule(searchStatement.getText(parsed), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText
-for (const mac of [false, true]) {
-  const results = new Function('computed', 'settingsQuery', 'settingsNavGroups', 'SETTINGS_SEARCH_INDEX', 'SETTINGS_SECTION_IDS', 't', 'filterAndRank', 'searchValue', 'isMacPlatform', `${searchCompiled}\nreturn settingsSearchResults`)(
-    callback => callback(), { value: 'macOS' }, { value: [] }, index, sectionIds, key => key,
-    matcher.filterAndRank, matcher.searchValue, mac,
-  )
-  assert.equal(results.some(result => result.key === 'desktop_lyrics:desktop_lyrics.menu_bar'), mac,
-    'macOS-only controls must only appear in search on macOS')
-}
+// 桌面歌词（含菜单栏歌词）已删除，该 macOS-only 断言随之移除
 
 for (const [query, expected] of [
   ['长音', 'lyrics:settings.lyric_emphasis_threshold'],
   ['long note', 'lyrics:settings.lyric_emphasis_threshold'],
-  ['滚动', 'desktop_lyrics:desktop_lyrics.max_width'],
-  ['max width', 'desktop_lyrics:desktop_lyrics.max_width'],
 ]) {
   const results = new Function('computed', 'settingsQuery', 'settingsNavGroups', 'SETTINGS_SEARCH_INDEX', 'SETTINGS_SECTION_IDS', 't', 'filterAndRank', 'searchValue', 'isMacPlatform', `${searchCompiled}\nreturn settingsSearchResults`)(
     callback => callback(), { value: query }, { value: [] }, index, sectionIds, key => key,

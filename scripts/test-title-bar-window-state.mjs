@@ -37,7 +37,7 @@ function mount({ mac = true, fullscreen = false, register, query } = {}) {
   const dependencies = {
     vue, 'vue-i18n': { useI18n: () => ({ t: key => key }) },
     '@tauri-apps/api/window': { getCurrentWindow: () => nativeWindow },
-    '@/modules/shortcuts/platform': { isMacPlatform: mac },
+    '@/modules/platform': { isMacPlatform: mac },
   }
   const component = new Function('require', 'exports', 'document', 'setTimeout', 'clearTimeout', `${compiled}\nreturn component`)(
     name => { assert.ok(name in dependencies, `unexpected dependency: ${name}`); return dependencies[name] },

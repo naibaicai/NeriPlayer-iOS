@@ -203,17 +203,14 @@ pub async fn fetch_bilibili_cover(
     Ok(data_url)
 }
 
-/// 按「是否绕过系统代理」各缓存一个客户端：每张封面都新建客户端会重复 TLS 初始化，连接也没法复用
-static COVER_CLIENTS: parking_lot::Mutex<[Option<reqwest::Client>; 2]> =
-    parking_lot::const_mutex([None, None]);
+/// 封面客户端只建一次：每张封面都新建会重复 TLS 初始化，连接也没法复用
+static COVER_CLIENT: parking_lot::Mutex<Option<reqwest::Client>> = parking_lot::const_mutex(None);
 
 fn cover_client(state: &AppState) -> AppResult<reqwest::Client> {
-    let no_proxy = state.bypasses_system_proxy();
-    let slot = usize::from(no_proxy);
-    if let Some(client) = COVER_CLIENTS.lock()[slot].clone() {
+    if let Some(client) = COVER_CLIENT.lock().clone() {
         return Ok(client);
     }
-    let mut builder = reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .cookie_provider(state.cookie_jar.clone())
         .user_agent(COVER_USER_AGENT)
         .connect_timeout(COVER_CONNECT_TIMEOUT)
@@ -225,13 +222,11 @@ fn cover_client(state: &AppState) -> AppResult<reqwest::Client> {
                 attempt.follow()
             }
         }));
-    if no_proxy {
-        builder = builder.no_proxy();
-    }
     let client = builder
+        .no_proxy()
         .build()
         .map_err(|err| AppError::Other(err.to_string()))?;
-    COVER_CLIENTS.lock()[slot] = Some(client.clone());
+    *COVER_CLIENT.lock() = Some(client.clone());
     Ok(client)
 }
 

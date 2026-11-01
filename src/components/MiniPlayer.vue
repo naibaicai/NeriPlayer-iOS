@@ -14,7 +14,6 @@ import { getTrackCoverUrl } from '@/utils/trackCover'
 import { formatTimeMs as formatTime } from '@/utils/timeFormat'
 import { useEscapeClose } from '@/composables/useEscapeClose'
 import { useToastStore } from '@/stores/toast'
-import { closeDesktopLyricsWindow, desktopLyricsOpen, openDesktopLyricsWindow } from '@/modules/desktopLyrics/bridge'
 
 type CoverSnapshot = {
   rect: { left: number; top: number; width: number; height: number }
@@ -34,15 +33,6 @@ const player = usePlayerStore()
 const lt = useListenTogetherStore()
 const { t } = useI18n()
 const toast = useToastStore()
-
-async function toggleDesktopLyrics() {
-  try {
-    if (desktopLyricsOpen.value) await closeDesktopLyricsWindow()
-    else await openDesktopLyricsWindow()
-  } catch {
-    toast.error(t('player.desktop_lyrics_failed'))
-  }
-}
 
 const showQueue = ref(false)
 const showLtPanel = ref(false)
@@ -100,11 +90,14 @@ function onProgressPointerMove(e: PointerEvent) {
 }
 
 function onProgressPointerUp(e: PointerEvent) {
-  if (!isDraggingProgress.value) return
-  updateDragRatio(e)
-  player.seekTo(dragRatio.value * player.durationMs)
-  isDraggingProgress.value = false
-  progressTrackRef.value?.releasePointerCapture(e.pointerId)
+  if (isDraggingProgress.value) {
+    updateDragRatio(e)
+    player.seekTo(dragRatio.value * player.durationMs)
+    isDraggingProgress.value = false
+    progressTrackRef.value?.releasePointerCapture(e.pointerId)
+  }
+  // 触屏抬起不会派发 mouseleave，必须在这里收 tooltip
+  if (e.pointerType !== 'mouse') endHover()
 }
 
 function onProgressMouseEnter() {
@@ -115,12 +108,24 @@ function onProgressMouseLeave() {
   isHoveringProgress.value = false
 }
 
+/* 触屏没有 hover 概念：手指按下会同时触发 pointerdown 和 pointermove，
+   但抬起后不会派发 mouseleave，isHoveringProgress 永远停在 true，
+   tooltip 就永久钉在进度条上（iOS 实测卡在左缘显示「00」）。
+   抬手指/取消指针时显式收起悬浮态。 */
+function endHover() {
+  isHoveringProgress.value = false
+}
+
 function updateHoverPosition(e: PointerEvent) {
   const el = progressTrackRef.value!
   const rect = el.getBoundingClientRect()
   const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
   hoverRatio.value = ratio
   hoverX.value = e.clientX - rect.left
+  /* 触屏上 pointermove 本身就是「手指在当前进度条上」的唯一信号，
+     它不像鼠标那样先派发 mouseenter，故在此补上悬浮态，
+     否则触屏拖拽过程中 tooltip 永远不显示。 */
+  if (e.pointerType !== 'mouse') isHoveringProgress.value = true
 }
 
 function updateDragRatio(e: PointerEvent) {
@@ -320,18 +325,8 @@ defineExpose({
         </button>
       </div>
 
-      <!-- 右：桌面歌词 + 音量 + 一起听 + 队列 + 展开 -->
+      <!-- 右：音量 + 一起听 + 队列 + 展开 -->
       <div class="mp-right">
-        <button
-          class="mp-tool-btn"
-          :class="{ active: desktopLyricsOpen }"
-          :title="t('player.desktop_lyrics')"
-          :aria-label="t('player.desktop_lyrics')"
-          :aria-pressed="desktopLyricsOpen"
-          @click="toggleDesktopLyrics"
-        >
-          <span class="material-symbols-rounded" :class="{ filled: desktopLyricsOpen }">lyrics</span>
-        </button>
         <div ref="volumeWrapRef" class="mp-volume-wrap">
           <button
             class="mp-tool-btn"
@@ -415,8 +410,9 @@ defineExpose({
 <style scoped lang="scss">
 .mini-player {
   position: fixed;
-  bottom: 0;
-  left: 80px;
+  /* 竖屏时底部导航条占位 → MiniPlayer 必须坐在它上方，否则 fixed bottom:0 会盖住导航 */
+  bottom: var(--side-nav-height, 0px);
+  left: var(--side-nav-width, 80px);
   right: 0;
   height: var(--mini-player-height, 76px);
   background: var(--md-surface-container-low);
@@ -806,6 +802,59 @@ defineExpose({
 }
 .mp-meta-swap-leave-to {
   opacity: 0;
+}
+
+/* ── 竖屏 / 窄窗口：MiniPlayer 收缩为移动端形态 ──────────────────────────
+   桌面版三栏共 10 个控件，402pt 宽下必然溢出。
+   移动端只保留「上一首 / 播放 / 下一首 / 展开」，其余进展开页操作。
+   隐藏而非删 DOM：桌面构建仍然复用同一份模板。 */
+@media (max-width: 640px) {
+  .mp-body {
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  /* 桌面专属：随机、循环、桌面歌词、音量、一起听、队列 */
+  .mp-center .mp-ctrl-btn.small,
+  .mp-right .mp-volume-wrap,
+  .mp-right .mp-tool-btn:not(:last-child) {
+    display: none;
+  }
+
+  .mp-right {
+    flex: 0 0 auto;
+  }
+
+  .mp-center {
+    flex: 0 0 auto;
+    gap: 2px;
+  }
+
+  .mp-left {
+    gap: 10px;
+    padding: 2px;
+    &:hover { background: transparent; }
+  }
+
+  /* iOS 没有 hover，去掉时隐时现的悬停态，避免触屏后样式残留 */
+  .mp-cover {
+    width: 44px;
+    height: 44px;
+  }
+
+  .mp-info,
+  .mp-meta {
+    min-height: 44px;
+  }
+
+  /* 时长行在窄屏是噪音：进度条已经表达了播放位置 */
+  .mp-time { display: none; }
+
+  .mp-tool-btn,
+  .mp-ctrl-btn {
+    width: 40px;
+    height: 40px;
+  }
 }
 
 </style>

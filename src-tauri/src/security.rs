@@ -8,7 +8,7 @@
 // 不承诺抵御同机同用户的恶意进程（Keychain 对未签名应用同样给不出这个承诺）。
 // 旧 Keychain 凭据在首次读取时自动迁入并删除。
 
-const SERVICE_NAME: &str = "moe.ouom.neriplayer.desktop";
+const SERVICE_NAME: &str = "com.d2lib.neriplayer-ios";
 
 pub const AUTH_STATE_KEY: &str = "auth-state-v1";
 pub const GITHUB_TOKEN_KEY: &str = "github-token-v1";
@@ -125,7 +125,7 @@ mod encrypted_secret_storage {
     type HmacSha256 = Hmac<Sha256>;
 
     const MAGIC: &[u8; 4] = b"NPS1";
-    const APP_SALT: &[u8] = b"moe.ouom.neriplayer.desktop/secret-store/v1";
+    const APP_SALT: &[u8] = b"com.d2lib.neriplayer-ios/secret-store/v1";
 
     // 凭据文件读写全程互斥：8 处 save_auth 调用点可能并发，
     // 无锁时两笔写互相覆盖会损坏文件（凭据损坏 = 用户被登出且不可恢复）

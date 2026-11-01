@@ -1,6 +1,6 @@
 [English](./README_EN.md) | [简体中文](./README.md)
 
-<h1 align="center">NeriPlayer Desktop</h1>
+<h1 align="center">NeriPlayer iOS</h1>
 
 <div align="center">
 
@@ -16,7 +16,7 @@
   <a href="https://t.me/ouom_pub"><img alt="Telegram" src="https://img.shields.io/badge/Telegram-@ouom__pub-blue" /></a>
 </p>
 
-<p><img src="app-icon.png" width="200" alt="NeriPlayer Desktop logo" /></p>
+<p><img src="app-icon.png" width="200" alt="NeriPlayer iOS logo" /></p>
 
 <p>A desktop port of <a href="https://github.com/cwuom/NeriPlayer">NeriPlayer (Android)</a>, built with <strong>Tauri 2 + Vue 3 + Rust</strong> for Windows, macOS and Linux.</p>
 

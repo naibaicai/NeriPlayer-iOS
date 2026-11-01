@@ -21,9 +21,9 @@ function load(source, dependencies = {}) {
   return exports
 }
 
-const styleModule = load(await read('../src/modules/desktopLyrics/style.ts'))
+const styleModule = load(await read('../src/modules/settings/fonts.ts'))
 const fonts = load(await read('../src/modules/settings/fonts.ts'), {
-  '@/modules/desktopLyrics/style': styleModule,
+  '@/modules/settings/fonts': styleModule,
 })
 assert.equal(fonts.fontFamilyStack(''), 'var(--font-family-default)')
 assert.equal(fonts.fontFamilyStack('  思源黑体  '), '"思源黑体", var(--font-family-default)')
@@ -60,7 +60,7 @@ const dependencies = {
   vue,
   'vue-i18n': { useI18n: () => ({ t: key => key }) },
   '@/modules/settings/fonts': fonts,
-  '@/modules/desktopLyrics/style': styleModule,
+  '@/modules/settings/fonts': styleModule,
   '@/components/ui/CustomSelect.vue': { default: {
     props: ['modelValue', 'options', 'label'], emits: ['update:modelValue'],
     setup(props, { emit }) {

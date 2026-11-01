@@ -67,7 +67,7 @@ function sameEntries(next: RecentLogEntry[]): boolean {
 function shortTarget(target: string): string {
   const webview = target.match(/^webview:(.*?)@.*?([\w-]+)\.(?:ts|js|vue)(?::\d+){0,2}$/)
   if (webview) return `web:${webview[2]}`
-  return target.replace(/^neri_player_desktop::/, '').replace(/^webview:/, 'web:')
+  return target.replace(/^neri_player_ios::/, '').replace(/^webview:/, 'web:')
 }
 
 async function refresh() {

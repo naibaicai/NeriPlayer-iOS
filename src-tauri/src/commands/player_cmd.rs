@@ -1106,20 +1106,6 @@ pub async fn set_volume(level: f32, state: State<'_, AppState>) -> AppResult<()>
 }
 
 #[tauri::command]
-pub async fn list_audio_output_devices() -> AppResult<Vec<crate::audio::player::AudioOutputDevice>> {
-    tokio::task::spawn_blocking(crate::audio::player::list_audio_output_devices)
-        .await
-        .map_err(|error| AppError::Other(error.to_string()))?
-}
-
-#[tauri::command]
-pub async fn set_audio_output_device(name: Option<String>, state: State<'_, AppState>) -> AppResult<()> {
-    let request = state.player.lock().request_output_device(name)?;
-    tokio::task::spawn_blocking(move || request.wait())
-        .await.map_err(|error| AppError::Other(error.to_string()))?
-}
-
-#[tauri::command]
 pub async fn seek(
     position_ms: u64,
     request_generation: u64,

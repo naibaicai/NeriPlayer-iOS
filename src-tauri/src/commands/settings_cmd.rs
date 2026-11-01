@@ -536,13 +536,6 @@ pub async fn save_file_bytes(path: String, data: Vec<u8>) -> AppResult<()> {
     std::fs::write(&path, &data).map_err(|e| AppError::Other(e.to_string()))
 }
 
-/// 设置绕过代理（前端保存设置后通知后端重建 HTTP Client）
-#[tauri::command]
-pub async fn set_bypass_proxy(bypass: bool, state: State<'_, AppState>) -> AppResult<()> {
-    state.rebuild_http(bypass);
-    Ok(())
-}
-
 /// 获取构建信息
 #[derive(Serialize)]
 pub struct BuildInfo {

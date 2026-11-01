@@ -47,10 +47,11 @@ struct QqSearchSong {
 #[derive(Debug, Deserialize)]
 struct QqSongSummary {
     #[serde(rename = "songmid")]
-    song_mid: String,
+    song_mid: Option<String>,
     #[serde(rename = "songname")]
-    song_name: String,
-    singer: Vec<QqArtist>,
+    song_name: Option<String>,
+    #[serde(default)]
+    singer: Option<Vec<QqArtist>>,
     #[serde(rename = "albummid")]
     album_mid: Option<String>,
     #[serde(rename = "albumname")]
@@ -142,21 +143,24 @@ impl QqMusicClient {
 
         Ok(songs
             .into_iter()
-            .map(|song| {
-                let singer_mid = song
-                    .singer
+            .filter_map(|song| {
+                // 逐条容错：任意一行畸形只跳过该行，不让整次搜索失败
+                let song_mid = song.song_mid.filter(|id| !id.trim().is_empty())?;
+                let song_name = song.song_name?;
+                let singers = song.singer.unwrap_or_default();
+                let singer_mid = singers
                     .iter()
                     .find_map(|a| a.mid.as_deref().filter(|mid| !mid.is_empty()))
                     .map(String::from);
-                QqSearchResult {
-                    song_mid: song.song_mid,
-                    song_name: song.song_name,
-                    artists: song.singer.into_iter().map(|a| a.name).collect(),
+                Some(QqSearchResult {
+                    song_mid,
+                    song_name,
+                    artists: singers.into_iter().map(|a| a.name).collect(),
                     album_name: song.album_name.unwrap_or_default(),
                     album_mid: song.album_mid,
                     singer_mid,
-                    duration_ms: song.interval.unwrap_or(0) * 1000,
-                }
+                    duration_ms: song.interval.unwrap_or(0).saturating_mul(1000),
+                })
             })
             .collect())
     }
@@ -249,10 +253,14 @@ impl QqMusicClient {
                 .sip
                 .unwrap_or_default()
                 .into_iter()
-                .find(|s| s.starts_with("http"))
+                // 只接受 https，避免上游 http 项把拉流降级为明文
+                .find(|s| s.starts_with("https://"))
                 .unwrap_or_else(|| "https://dl.stream.qqmusic.qq.com/".to_string());
-            let url = if purl.starts_with("http") {
+            let url = if purl.starts_with("https://") {
                 purl
+            } else if purl.starts_with("http://") {
+                // 明文直链升为 https，对齐网易云侧的处理
+                purl.replacen("http://", "https://", 1)
             } else {
                 format!(
                     "{}{}",

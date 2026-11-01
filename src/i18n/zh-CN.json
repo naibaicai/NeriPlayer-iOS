@@ -992,11 +992,6 @@
     "clear_confirm_btn": "确定清空"
   },
   "settings": {
-    "audio_output": "音频输出设备",
-    "audio_output_default": "跟随系统默认设备",
-    "audio_output_desc": "切换设备时保留播放位置；默认选项自动跟随系统变化",
-    "audio_output_unavailable": "{name}（未连接）",
-    "audio_output_failed": "无法切换音频输出设备",
     "title": "设置",
     "accounts": "账号",
     "nav_accounts_desc": "管理平台登录与授权状态",
@@ -1363,9 +1358,6 @@
     "ffmpeg_component_unavailable": "未能加载，Opus、E-AC-3 等格式暂时无法播放",
     "network": "网络",
     "nav_network_desc": "配置网络连接",
-    "bypass_proxy": "绕过代理",
-    "bypass_proxy_desc": "绕过系统代理直接连接，适用于代理导致的连接问题",
-    "bypass_proxy_failed": "代理模式切换失败，已恢复原设置",
     "download_manage": "下载管理",
     "download_progress": "已完成 {completed}/{total}",
     "cancel_all_downloads": "取消全部",

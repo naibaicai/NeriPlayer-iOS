@@ -6,12 +6,7 @@ import {
 import { useRoute, useRouter } from 'vue-router'
 import { usePlayerStore, displayAlbum } from '@/stores/player'
 import { usePlaybackStatsStore } from '@/stores/playbackStats'
-import { installGlobalShortcuts, type ShortcutActions } from '@/modules/shortcuts/globalShortcuts'
-import { applySystemShortcuts, clearSystemShortcuts } from '@/modules/shortcuts/systemShortcuts'
-import { detectPlatform } from '@/modules/shortcuts/platform'
-import { shortcutRecording } from '@/modules/shortcuts/recording'
-import { closeDesktopLyricsWindow, desktopLyricsOpen, installDesktopLyricsBridge, openDesktopLyricsWindow } from '@/modules/desktopLyrics/bridge'
-import { installTrayBridge, quitApp } from '@/modules/tray/bridge'
+import { detectPlatform, isIosPlatform } from '@/modules/platform'
 import { syncFrequencyDelayMs, useSyncStore } from '@/stores/sync'
 import { useAuthStore } from '@/stores/auth'
 import { useRecommendStore } from '@/stores/recommend'
@@ -63,11 +58,17 @@ const route = useRoute()
 const router = useRouter()
 useUpcomingLyricsPrefetch()
 const isNowPlayingOpen = ref(false)
+
+// Toast 等浮层用 Teleport 挂到 body 下，`.app-layout--now-playing` 不可能是它们的祖先，
+// 靠 DOM 祖先写的定位规则会静默失效。把播放页状态记到 body 上，浮层直接读这个类。
+watch(isNowPlayingOpen, (open) => {
+  document.body.classList.toggle('np-open', open)
+}, { immediate: true })
+onUnmounted(() => {
+  document.body.classList.remove('np-open')
+})
 // 静音前的音量，取消静音时还原
 let volumeBeforeMute = 0.5
-let uninstallShortcuts: (() => void) | null = null
-let stopSystemShortcuts: (() => void) | null = null
-let uninstallDesktopLyrics: (() => void) | null = null
 const contentRef = ref<HTMLElement | null>(null)
 const miniPlayerRef = ref<InstanceType<typeof MiniPlayer> | null>(null)
 const nowPlayingRef = ref<InstanceType<typeof NowPlaying> | null>(null)
@@ -254,36 +255,14 @@ let historyProgressTimer: ReturnType<typeof setTimeout> | null = null
 let periodicSyncTimer: ReturnType<typeof setInterval> | null = null
 let unlistenPlaylistChanged: UnlistenFn | null = null
 let unlistenPlaylistUsage: UnlistenFn | null = null
-let unlistenCloseRequested: UnlistenFn | null = null
-let uninstallTray: (() => void) | null = null
+
+// iOS：没有窗口、没有托盘、没有物理键盘，相关桌面通路已在源码级删除
+const isIos = isIosPlatform
 
 function handleBeforeUnload() {
   void player.flushPlayerState()
   // 结算最后一段收听，否则关窗前听的时长会丢
   void usePlaybackStatsStore().flushFinal()
-}
-
-function flushBeforeExit() {
-  return Promise.allSettled([player.flushPlayerState(), usePlaybackStatsStore().flushFinal()])
-}
-
-// 关窗流程进行中：重复的关闭请求不再触发落盘
-let closeFlushing = false
-
-// 主窗口的隐藏由 Rust 侧完成（关闭 = 收进托盘）；这里必须 preventDefault，
-// 否则 JS 侧会接着 destroy 窗口。关闭即退出时落盘后再结束进程
-async function handleCloseRequested(event: { preventDefault: () => void }) {
-  event.preventDefault()
-  if (closeFlushing) return
-  closeFlushing = true
-  try {
-    if (settingsStore.closeToTray) await flushBeforeExit()
-    else await quitApp(flushBeforeExit)
-  } catch {
-    // 落盘失败不阻塞
-  } finally {
-    closeFlushing = false
-  }
 }
 
 function scheduleDebouncedSync() {
@@ -428,94 +407,14 @@ watch(
 
 // 启动时初始化：加载同步配置 + 检查登录状态 + 自动同步
 onMounted(async () => {
-  uninstallDesktopLyrics = installDesktopLyricsBridge({
-    openSettings: () => {
-      if (isNowPlayingOpen.value) closeNowPlaying()
-      // 带上时间戳：已经在设置页时也能再次跳到桌面歌词分区
-      void router.push({ name: 'settings', query: { section: 'desktop_lyrics', focus: 'desktop-lyrics', at: String(Date.now()) } })
-    },
-  })
-  uninstallTray = installTrayBridge({
-    openNowPlaying: () => void openNowPlaying(),
-    flushBeforeQuit: flushBeforeExit,
-  })
   const syncStore = useSyncStore()
   const authStore = useAuthStore()
   window.addEventListener('beforeunload', handleBeforeUnload)
   window.addEventListener('pagehide', handleBeforeUnload)
-  try {
-    unlistenCloseRequested = await getCurrentWindow().onCloseRequested(handleCloseRequested)
-  } catch {
-    // 浏览器开发模式没有原生窗口事件时依赖 pagehide/beforeunload
-  }
 
   // Rust 配置是启动后的规范来源，本地影子只负责首屏快速显示
   // 播放统计要在任何播放发生之前接上，否则首曲不计数
   usePlaybackStatsStore().attach()
-  const shortcutActions: ShortcutActions = {
-    togglePlay: () => void player.togglePlayPause(),
-    next: () => void player.next(),
-    previous: () => void player.previous(),
-    seekBy: (deltaMs) => {
-      if (!player.hasPlaybackSession) return
-      const target = Math.max(0, Math.min(player.durationMs, player.positionMs + deltaMs))
-      void player.seekTo(target)
-    },
-    adjustVolume: (delta) => {
-      void player.setVolume(Math.max(0, Math.min(1, player.volume + delta)))
-    },
-    toggleMute: () => {
-      if (player.volume > 0) {
-        volumeBeforeMute = player.volume
-        void player.setVolume(0)
-      } else {
-        void player.setVolume(volumeBeforeMute || 0.5)
-      }
-    },
-    toggleNowPlaying: () => {
-      if (isNowPlayingOpen.value) void closeNowPlaying()
-      else if (player.hasPlaybackSession) openNowPlaying()
-    },
-    closeOverlay: () => {
-      if (!isNowPlayingOpen.value) return false
-      void closeNowPlaying()
-      return true
-    },
-    focusSearch: () => {
-      const focusInput = () => requestAnimationFrame(() => {
-        const input = document.querySelector<HTMLInputElement>('[data-shortcut-search]')
-        input?.focus()
-        input?.select()
-      })
-      // 已在探索页时直接聚焦，不能重新 push 把 ?q= 冲掉
-      if (router.currentRoute.value.name === 'explore') focusInput()
-      else void router.push({ name: 'explore' }).then(focusInput)
-    },
-    toggleShuffle: () => player.toggleShuffle(),
-    cycleRepeat: () => player.toggleRepeatMode(),
-    toggleLike: () => {
-      if (player.currentTrack) void likedSongs.toggleTrack(player.currentTrack)
-    },
-    toggleDesktopLyrics: () => {
-      const toggle = desktopLyricsOpen.value ? closeDesktopLyricsWindow() : openDesktopLyricsWindow()
-      void toggle.catch(() => useToastStore().error((i18n.global as any).t('player.desktop_lyrics_failed')))
-    },
-    showWindow: () => {
-      const appWindow = getCurrentWindow()
-      void appWindow.unminimize().then(() => appWindow.show()).then(() => appWindow.setFocus()).catch(() => {})
-    },
-    // 覆盖所有实际存在的弹层根类，弹层打开时不响应全局播放快捷键（UI-002）
-    isOverlayOpen: () => document.querySelector(
-      '.m3-dialog-overlay, .dialog-overlay, .context-menu-overlay, .atp-overlay, .lt-overlay, .queue-overlay, .comments-overlay, .notif-overlay, .debug-dialog-overlay',
-    ) !== null,
-  }
-  uninstallShortcuts = installGlobalShortcuts(shortcutActions, () => settingsStore.shortcutBindings)
-  stopSystemShortcuts = watch(
-    () => [settingsStore.shortcutBindings, settingsStore.globalShortcutsEnabled, shortcutRecording.value] as const,
-    ([bindings, enabled, recording]) => void applySystemShortcuts(bindings, enabled && !recording, shortcutActions),
-    { immediate: true },
-  )
-
   await settingsStore.hydrate()
   applyTheme(settingsStore.darkMode, false)
   applyThemeColor(settingsStore.themeColor, undefined, false)
@@ -533,12 +432,6 @@ onMounted(async () => {
   if (route.name === 'home' && settingsStore.defaultScreen !== 'home') {
     await router.replace({ name: settingsStore.defaultScreen })
   }
-  try {
-    await invoke('set_bypass_proxy', { bypass: settingsStore.bypassProxy })
-  } catch {
-    // 浏览器开发模式没有 Rust bridge 时忽略
-  }
-
   // 并行加载
   await Promise.allSettled([
     syncStore.loadConfigs(),
@@ -580,14 +473,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  uninstallDesktopLyrics?.()
-  uninstallDesktopLyrics = null
   void player.flushPlayerState()
-  uninstallShortcuts?.()
-  uninstallShortcuts = null
-  stopSystemShortcuts?.()
-  stopSystemShortcuts = null
-  void clearSystemShortcuts()
   window.removeEventListener('beforeunload', handleBeforeUnload)
   window.removeEventListener('pagehide', handleBeforeUnload)
   window.removeEventListener('focus', handleWindowFocus)
@@ -601,14 +487,11 @@ onUnmounted(() => {
   window.removeEventListener(HISTORY_CHANGED_EVENT, scheduleHistorySync)
   if (unlistenPlaylistChanged) unlistenPlaylistChanged()
   if (unlistenPlaylistUsage) unlistenPlaylistUsage()
-  if (unlistenCloseRequested) unlistenCloseRequested()
-  uninstallTray?.()
-  uninstallTray = null
 })
 </script>
 
 <template>
-  <div class="app-layout">
+  <div class="app-layout" :class="{ 'app-layout--now-playing': isNowPlayingOpen }">
     <!-- 自定义背景图 -->
     <AppBackgroundImage
       v-if="bgImageSrc"
@@ -654,7 +537,7 @@ onUnmounted(() => {
       <NowPlaying
         v-if="isNowPlayingOpen"
         ref="nowPlayingRef"
-        hide-header
+        :hide-header="!isIos"
         :transition-state="nowPlayingMotionState"
         @collapse="closeNowPlaying()"
       />
@@ -698,8 +581,25 @@ onUnmounted(() => {
   height: 100%;
   overflow: hidden;
   position: relative;
-  padding-top: var(--titlebar-height, 36px); /* 让出顶栏高度（与 TitleBar / mac 红绿灯对齐） */
+  padding-top: calc(var(--titlebar-height, 36px) + var(--safe-area-top, 0px)); /* 顶栏高度 + 刘海安全区 */
+  /* 横屏时刘海/灵动岛转到左右边缘，竖屏为 0，两种情况共用一条规则 */
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
   isolation: isolate;
+  /* 导航条占位：竖屏时由左侧竖排改为底部横排，MiniPlayer 与正文据此让位 */
+  --side-nav-width: 80px;
+  --side-nav-height: 0px;
+}
+
+/* 竖屏 / 窄窗口 / 手机横屏：导航转底部横条，正文与 MiniPlayer 相应收缩
+   横屏手机（如 844×390）宽度超出 640px，但它仍然是手机，
+   左侧 80px 竖排导航会挤掉近 10% 的可用宽度，因此按高度补充判定。 */
+@media (max-width: 640px), (orientation: landscape) and (max-height: 500px) {
+  .app-layout {
+    --side-nav-width: 0px;
+    --side-nav-height: calc(56px + env(safe-area-inset-bottom, 0px));
+    flex-direction: column-reverse; /* DOM 里 SideNav 在前，反转后落到底部 */
+  }
 }
 
 .app-side-nav {
@@ -712,14 +612,36 @@ onUnmounted(() => {
   max-height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
+  /* 只允许纵向手势平移页面；横向留给内部的 chip/tab 横滑条，
+     否则 iOS 会把整页当橡皮筋左右拖（表现为「列表能左右滑动」）。 */
+  touch-action: pan-y;
+  overscroll-behavior-x: none;
   position: relative;
   z-index: 2;
   transition: padding-bottom 300ms var(--ease-standard);
 
   /* 缩小滚动视口，避免正文透过透明底栏，底部少量余量避开进度条热区 */
   &.has-mini-player {
-    max-height: calc(100% - var(--mini-player-height, 76px));
+    max-height: calc(100% - var(--mini-player-height, 76px) - var(--side-nav-height, 0px));
     padding-bottom: 6px;
+  }
+
+  /* 无 MiniPlayer 时也要让出底部导航条高度（含 Home 指示条安全区） */
+  @media (max-width: 640px), (orientation: landscape) and (max-height: 500px) {
+    max-height: calc(100% - var(--side-nav-height, 0px));
+
+    /* MiniPlayer 是 position:fixed，不参与文档流。移动端设置页等把
+       .content 改成 height:auto 整页滚动后，max-height 不再起作用，
+       正文最后一段会压在播放条下面 —— 用 padding 让出它的高度。 */
+    &.has-mini-player {
+      /* 上面基础规则里的 max-height 还会减掉 --mini-player-height，但窄屏下
+         MiniPlayer 是 fixed、导航条又是流内兄弟，再减一次就是重复扣减：
+         扣出来的 76px 在 column-reverse 的剩余空间里跑到顶部，
+         表现为内容上方一整块空白（小程序实测 content.t=138 而 padding-top 仅 62）。
+         这里把 max-height 拉回只减导航条，播放条高度交给下面的 padding 让位。 */
+      max-height: calc(100% - var(--side-nav-height, 0px));
+      padding-bottom: calc(var(--mini-player-height, 76px) + 20px);
+    }
   }
 }
 

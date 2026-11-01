@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use reqwest::Client;
 use serde_json::{json, Value};
-use tauri::Manager;
 
 use crate::api::transport::FallbackHttp;
 use crate::auth::state::YouTubeAuth;
@@ -707,10 +706,6 @@ fn build_playback_client(no_proxy: bool) -> AppResult<Client> {
         .map_err(|e| AppError::Other(format!("build youtube playback client: {e}")))
 }
 
-fn proxy_order(bypass_proxy: bool) -> [bool; 2] {
-    [bypass_proxy, !bypass_proxy]
-}
-
 // 直连与走代理各一个进程级客户端；每次解析都新建会丢掉连接池，次次重新握手
 static PLAYBACK_CLIENTS: std::sync::OnceLock<[Client; 2]> = std::sync::OnceLock::new();
 
@@ -725,12 +720,11 @@ fn shared_playback_client(no_proxy: bool) -> AppResult<Client> {
     Ok(clients[usize::from(no_proxy)].clone())
 }
 
-// 与主应用保持相同代理优先级，独立客户端避免自动携带账号 Cookie
-fn playback_http_client(bypass_proxy: bool) -> AppResult<FallbackHttp> {
-    let [primary, fallback] = proxy_order(bypass_proxy);
+// 独立客户端避免自动携带账号 Cookie；主客户端直连、兜底客户端走系统代理
+fn playback_http_client() -> AppResult<FallbackHttp> {
     Ok(FallbackHttp::with_fallback(
-        &shared_playback_client(primary)?,
-        &shared_playback_client(fallback)?,
+        &shared_playback_client(true)?,
+        &shared_playback_client(false)?,
         "youtube-playback",
     ))
 }
@@ -1018,8 +1012,8 @@ async fn resolve_format_streams(
 /// 启动预热，对齐 Android warmYouTubePlaybackIfEnabled：首页配置和 player.js 是首选客户端取流的前置，
 /// 等第一次点播才去拿，首选客户端全部顺延、退到备用客户端，再叠上 API 域名的冷握手（经代理一次 2 秒左右）。
 /// 提前拿好并把连接留在池里，第一首就能直接走首选客户端
-pub async fn warm_playback(auth: Option<YouTubeAuth>, bypass_proxy: bool) {
-    let Ok(http) = playback_http_client(bypass_proxy) else {
+pub async fn warm_playback(auth: Option<YouTubeAuth>) {
+    let Ok(http) = playback_http_client() else {
         return;
     };
     let started = std::time::Instant::now();
@@ -1112,11 +1106,7 @@ pub async fn resolve_audio_streams_with_source(
             return Ok(streams);
         }
     }
-    let bypass_proxy = app
-        .and_then(|app| app.try_state::<crate::state::AppState>())
-        .map(|state| state.bypasses_system_proxy())
-        .unwrap_or(true);
-    let http = playback_http_client(bypass_proxy)?;
+    let http = playback_http_client()?;
     let logged_in = auth.is_some_and(YouTubeAuth::has_login);
     let mut errors = Vec::new();
     let mut authenticated_bootstrap = BootstrapAttempt::default();
@@ -1372,17 +1362,19 @@ pub async fn resolve_audio_streams_with_source(
                 Some(manifest.into())
             };
             if let Some(manifest) = manifest {
-                if let Ok(candidates) =
-                    super::hls::fetch_audio_playlists(&http, &manifest, duration_ms).await
-                {
-                    for candidate in candidates {
-                        if !hls_fallback
-                            .iter()
-                            .any(|stream: &YtAudioStream| stream.url == candidate.url)
-                        {
-                            hls_fallback.push(candidate);
+                match super::hls::fetch_audio_playlists(&http, &manifest, duration_ms).await {
+                    Ok(candidates) => {
+                        for candidate in candidates {
+                            if !hls_fallback
+                                .iter()
+                                .any(|stream: &YtAudioStream| stream.url == candidate.url)
+                            {
+                                hls_fallback.push(candidate);
+                            }
                         }
                     }
+                    // 不能吞掉：清单被 CDN 拒绝 / 重定向到不可信域 / 格式非法都要可诊断
+                    Err(error) => errors.push(format!("{}:hls:{error}", profile.client_name)),
                 }
             }
         }
@@ -1413,11 +1405,14 @@ pub async fn resolve_audio_streams_with_source(
                         .manifest
                         .and_then(|manifest| super::hls::append_manifest_token(&manifest, &token))
                     {
-                        if let Ok(candidates) =
-                            super::hls::fetch_audio_playlists(&http, &manifest, pending.duration_ms)
-                                .await
+                        match super::hls::fetch_audio_playlists(&http, &manifest, pending.duration_ms)
+                            .await
                         {
-                            hls_fallback.extend(candidates);
+                            Ok(candidates) => hls_fallback.extend(candidates),
+                            Err(error) => log::warn!(
+                                target: "youtube-playback",
+                                "hls fallback after po token failed: {error}"
+                            ),
                         }
                     }
                 }
@@ -1594,12 +1589,6 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-    }
-
-    #[test]
-    fn http_proxy_priority_respects_the_user_preference() {
-        assert_eq!(super::proxy_order(true), [true, false]);
-        assert_eq!(super::proxy_order(false), [false, true]);
     }
 
     #[test]

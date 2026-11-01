@@ -1569,6 +1569,20 @@ onUnmounted(() => {
   display: flex;
   gap: 8px;
   margin-bottom: 20px;
+  /* 窄屏下 4 个 chip 超出 402pt：必须可横向滑动，否则右侧 tab 点不到 */
+  overflow-x: auto;
+  touch-action: pan-x;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  /* 左右各留一点内边距，滚动到末端时 chip 不贴边 */
+  padding: 2px 2px 6px;
+  scroll-padding-inline: 2px;
+
+  &::-webkit-scrollbar { display: none; }
+
+  /* 子元素不压缩，否则 chip 会被挤成省略号而不是滚动 */
+  > * { flex: 0 0 auto; }
 }
 
 .tab-chip {
@@ -2122,11 +2136,12 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   color: var(--md-on-surface-variant);
-  opacity: 0;
+  /* 常显：歌单卡片的三点菜单在触屏上没有 hover 可依赖 */
+  opacity: 0.55;
   transition: opacity var(--duration-short), background var(--duration-short);
 
-  .playlist-item:hover & { opacity: 1; }
-  &:hover { background: var(--md-surface-container-high); }
+  .playlist-item:hover & { opacity: 0.85; }
+  &:hover { opacity: 1; background: var(--md-surface-container-high); }
 
   &.danger {
     opacity: 1;

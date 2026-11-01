@@ -55,7 +55,7 @@ const activeSection = computed(() => (route.meta.section as string) ?? route.nam
 
 <style scoped lang="scss">
 .side-nav {
-  width: 80px;
+  width: var(--side-nav-width, 80px);
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -116,5 +116,41 @@ const activeSection = computed(() => (route.meta.section as string) ?? route.nam
   font-weight: 500;
   color: var(--md-on-surface-variant);
   transition: all var(--duration-short);
+}
+
+/* 竖屏 / 窄窗口：左侧竖排导航占宽太大，改为贴底横向标签栏。
+   宽度交给 App.vue 的 --side-nav-width=0，这里只负责变成横条。
+   ★ 必须放在所有基础规则之后：同优先级下源码顺序决定胜负，
+     若置于基础规则之前，下列覆盖会被 .nav-list/.nav-item 等基础规则逐条反杀。 */
+@media (max-width: 640px), (orientation: landscape) and (max-height: 500px) {
+  .side-nav {
+    width: 100%;
+    height: var(--side-nav-height, 64px);
+    flex-direction: row;
+    justify-content: space-around;
+    border-right: none;
+    border-top: 1px solid var(--md-surface-container-high);
+    padding: 4px 0 calc(4px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .nav-list {
+    flex-direction: row;
+    justify-content: space-around;
+    width: 100%;
+    gap: 0;
+  }
+
+  .nav-item {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .nav-pill {
+    width: 48px;
+  }
+
+  .nav-label {
+    font-size: 10px;
+  }
 }
 </style>

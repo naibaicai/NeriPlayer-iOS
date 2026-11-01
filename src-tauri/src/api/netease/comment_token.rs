@@ -8,7 +8,7 @@ use std::time::Duration;
 use tauri::{webview::PageLoadEvent, AppHandle, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::error::{AppError, AppResult};
-use crate::webview_args::MainBrowserArgs;
+use crate::webview_args::{DesktopWindowExt, MainBrowserArgs};
 
 const PAGE_URL: &str = "https://music.163.com/";
 const BRIDGE_HOST: &str = "neriplayer-netease-bridge.invalid";
@@ -92,7 +92,7 @@ pub async fn mint_comment_token(app: &AppHandle) -> AppResult<String> {
             WebviewUrl::External(PAGE_URL.parse().expect("static URL")),
         )
         .visible(false)
-        .skip_taskbar(true)
+        .desktop_skip_taskbar()
         .user_agent(USER_AGENT)
         .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
         .on_navigation(move |url| {

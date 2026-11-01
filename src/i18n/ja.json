@@ -992,11 +992,6 @@
     "clear_confirm_btn": "消去する"
   },
   "settings": {
-    "audio_output": "音声出力デバイス",
-    "audio_output_default": "システムの既定に従う",
-    "audio_output_desc": "デバイス切替時も再生位置を保持し、既定の設定ではシステムの変更に追従します",
-    "audio_output_unavailable": "{name}（未接続）",
-    "audio_output_failed": "音声出力デバイスを切り替えられませんでした",
     "title": "設定",
     "accounts": "アカウント",
     "nav_accounts_desc": "サービスのログインと認証を管理",
@@ -1363,9 +1358,6 @@
     "ffmpeg_component_unavailable": "読み込めていないため、Opus や E-AC-3 などは現在再生できません",
     "network": "ネットワーク",
     "nav_network_desc": "ネットワーク接続を設定",
-    "bypass_proxy": "プロキシをバイパス",
-    "bypass_proxy_desc": "システムプロキシをバイパスして直接接続（プロキシが原因の問題に有効）",
-    "bypass_proxy_failed": "プロキシモードを切り替えられなかったため、元の設定に戻しました",
     "download_manage": "ダウンロード管理",
     "download_progress": "{completed}/{total} 完了",
     "cancel_all_downloads": "すべてキャンセル",

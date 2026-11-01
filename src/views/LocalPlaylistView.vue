@@ -1274,10 +1274,11 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   color: var(--md-on-surface-variant);
-  opacity: 0;
+  /* 常显：隐藏态会让人以为整行不可点，触屏也无 hover 可言 */
+  opacity: 0.55;
   transition: opacity var(--duration-short), background var(--duration-short);
 
-  .track-item:hover & { opacity: 0.6; }
+  .track-item:hover & { opacity: 0.8; }
   &:hover { opacity: 1 !important; background: var(--md-surface-container-high); }
   .material-symbols-rounded { font-size: 18px; }
 }

@@ -34,26 +34,21 @@ const source = await readFile(new URL('../src/stores/settings.ts', import.meta.u
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText
-const desktopLyricsStyle = {}
-new Function('exports', ts.transpileModule(await readFile(new URL('../src/modules/desktopLyrics/style.ts', import.meta.url), 'utf8'), {
+const fontsModule = {}
+new Function('exports', ts.transpileModule(await readFile(new URL('../src/modules/settings/fonts.ts', import.meta.url), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-}).outputText)(desktopLyricsStyle)
+}).outputText)(fontsModule)
 const shortcutPlatform = {}
-new Function('exports', ts.transpileModule(await readFile(new URL('../src/modules/shortcuts/platform.ts', import.meta.url), 'utf8'), {
+new Function('exports', ts.transpileModule(await readFile(new URL('../src/modules/platform.ts', import.meta.url), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText)(shortcutPlatform)
-const shortcutBindings = {}
-new Function('require', 'exports', ts.transpileModule(await readFile(new URL('../src/modules/shortcuts/bindings.ts', import.meta.url), 'utf8'), {
-  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-}).outputText)(() => shortcutPlatform, shortcutBindings)
 const exports = {}
 new Function('require', 'exports', compiled)(name => {
   if (name === 'pinia') return pinia
   if (name === 'vue') return vue
   if (name === '@tauri-apps/api/core') return bridge
   if (name === '@/utils/logger') return { createLogger: () => ({ info() {}, warn() {}, error() {}, debug() {} }) }
-  if (name === '@/modules/desktopLyrics/style') return desktopLyricsStyle
-  if (name === '@/modules/shortcuts/bindings') return shortcutBindings
+  if (name === '@/modules/settings/fonts') return fontsModule
   if (name === '@/modules/audioEffects/model') return audioEffectsModel
   throw new Error(`Unexpected settings dependency: ${name}`)
 }, exports)

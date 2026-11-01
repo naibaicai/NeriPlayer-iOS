@@ -162,12 +162,21 @@ pub fn install_panic_hook(app_version: &'static str) {
             tail,
         );
         let dir = crash_dir();
-        let _ = std::fs::create_dir_all(&dir);
         let name = format!(
             "crash-{}.txt",
             chrono::Local::now().format("%Y%m%d-%H%M%S%.3f")
         );
-        let _ = std::fs::write(dir.join(name), report);
+        // 写盘失败不能静默：iOS 上崩溃现场是唯一证据。
+        // 先试标准目录，失败再退到临时目录（iOS 上仍在沙盒内，可由
+        // 下次启动时补拷），仍不行就放弃——崩溃路径上不能再 panic。
+        let written = std::fs::create_dir_all(&dir)
+            .and_then(|_| std::fs::write(dir.join(&name), &report))
+            .is_ok()
+            || std::fs::write(std::env::temp_dir().join(&name), &report).is_ok();
+        if !written {
+            // 最后一道：至少把崩溃原因吐到 stderr，console 日志能捕获到
+            eprintln!("[CRASH] failed to persist crash report; panic: {}", info);
+        }
         // 写完即轮转：debug 命令或循环崩溃不能把磁盘写满
         rotate_crash_reports(&dir);
         default_hook(info);
@@ -226,8 +235,29 @@ pub fn parse_level(level: &str) -> LevelFilter {
     }
 }
 
+/// iOS 沙盒的 Documents 目录（「文件」App 可见，由 UIFileSharingEnabled 决定）
+///
+/// iOS 进程的 `HOME` 环境变量就是 App 沙盒根目录，拼上 `Documents` 即得。
+/// 不用 Tauri 的 path resolver：日志插件在 builder 阶段就要这个路径，
+/// 那时还没有 app handle。
+#[cfg(target_os = "ios")]
+fn ios_documents_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join("Documents"))
+}
+
 /// 日志文件目录（不保证已创建，插件写入前会自行创建）
+///
+/// iOS 特例：`data_dir()` 落在沙盒的 `Library/Application Support`，用户无法从
+/// 「文件」App 取到；崩溃排查必须能导出，因此改为 `<Documents>/NeriPlayer/logs`。
 pub fn log_dir() -> PathBuf {
+    #[cfg(target_os = "ios")]
+    {
+        if let Some(docs) = ios_documents_dir() {
+            return docs.join(LOG_SUBDIR).join(LOG_DIR_NAME);
+        }
+    }
     let mut path = dirs_next::data_dir().unwrap_or_else(|| PathBuf::from("."));
     path.push(LOG_SUBDIR);
     path.push(LOG_DIR_NAME);
@@ -235,7 +265,7 @@ pub fn log_dir() -> PathBuf {
 }
 
 /// 应用标识（与 tauri.conf.json 的 identifier 保持一致）
-const APP_IDENTIFIER: &str = "moe.ouom.neriplayer.desktop";
+const APP_IDENTIFIER: &str = "com.d2lib.neriplayer-ios";
 /// tauri-plugin-store 的设置文件名
 const SETTINGS_STORE_FILE: &str = "settings.json";
 /// settings.json 中的顶层键
@@ -249,9 +279,12 @@ pub struct BootstrapConfig {
 
 impl Default for BootstrapConfig {
     fn default() -> Self {
-        // 默认不落文件、级别 Info，与 AppSettings 默认值保持一致
+        // 桌面默认不落文件、级别 Info
+        //
+        // iOS 反例：闪退后没有可回取的 console，不落文件就等于零证据，
+        // 所以移动端默认开启文件日志（仍可在设置里关掉）。
         Self {
-            log_to_file: false,
+            log_to_file: cfg!(any(target_os = "ios", target_os = "android")),
             level: LevelFilter::Info,
         }
     }

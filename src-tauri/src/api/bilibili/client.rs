@@ -25,6 +25,28 @@ fn mixin_key_cache() -> &'static MixinKeyCache {
     CACHE.get_or_init(|| TokioMutex::new(None))
 }
 
+fn anonymous_cookie_cache() -> &'static AnonymousCookieCache {
+    static CACHE: OnceLock<AnonymousCookieCache> = OnceLock::new();
+    CACHE.get_or_init(|| TokioMutex::new(None))
+}
+
+/// 风控类业务码：-352 风控校验失败 / -403 权限不足 / -412 请求被拦截
+/// `validate_bili_response` 把它们变成 `AppError::Api`，这里从文案里识别
+fn is_bili_risk_error(error: &AppError) -> bool {
+    match error {
+        AppError::Api(message) => ["-352", "-403", "-412"]
+            .iter()
+            .any(|code| message.contains(&format!("code={code},"))),
+        _ => false,
+    }
+}
+
+/// 命中风控后清空 wbi 密钥与匿名指纹缓存，避免在 TTL 内持续复用同一被拒凭证
+async fn invalidate_bili_risk_caches() {
+    *mixin_key_cache().lock().await = None;
+    *anonymous_cookie_cache().lock().await = None;
+}
+
 pub struct BiliClient {
     http: FallbackHttp,
     cookie_jar: Option<Arc<Jar>>,
@@ -90,8 +112,7 @@ impl BiliClient {
         if has_bili_identity(jar) {
             return Ok(());
         }
-        static CACHE: OnceLock<AnonymousCookieCache> = OnceLock::new();
-        let mut cache = CACHE.get_or_init(|| TokioMutex::new(None)).lock().await;
+        let mut cache = anonymous_cookie_cache().lock().await;
         if cache
             .as_ref()
             .is_none_or(|(_, expires)| *expires <= Instant::now())
@@ -197,8 +218,20 @@ impl BiliClient {
         validate_bili_response(body)
     }
 
-    /// 带 Wbi 签名的 GET 请求
-    async fn wbi_get(&self, url: &str, mut params: BTreeMap<String, String>) -> AppResult<Value> {
+    /// wbi 请求：命中风控码时清缓存并重试一次
+    async fn wbi_get(&self, url: &str, params: BTreeMap<String, String>) -> AppResult<Value> {
+        let first = self.wbi_get_once(url, params.clone()).await;
+        match &first {
+            Err(error) if is_bili_risk_error(error) => {
+                log::warn!(target: "bilibili", "wbi risk code hit, invalidating caches: {error}");
+                invalidate_bili_risk_caches().await;
+                self.wbi_get_once(url, params).await
+            }
+            _ => first,
+        }
+    }
+
+    async fn wbi_get_once(&self, url: &str, mut params: BTreeMap<String, String>) -> AppResult<Value> {
         self.ensure_anonymous_session().await?;
         let mixin_key = self.ensure_mixin_key().await?;
         wbi::sign_params(&mut params, &mixin_key);

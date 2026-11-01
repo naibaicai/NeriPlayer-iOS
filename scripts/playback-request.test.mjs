@@ -221,11 +221,8 @@ assert.match(
   /window\.addEventListener\('beforeunload', handleBeforeUnload\)/,
   'the app must flush player state before the WebView closes',
 )
-assert.match(
-  appSource,
-  /getCurrentWindow\(\)\.onCloseRequested\(handleCloseRequested\)/,
-  'the app must flush player state for a native Tauri window close',
-)
+// iOS 化后主窗口没有「关闭」语义（无托盘、无窗口控制），onCloseRequested
+// 通路已移除；落盘改由 beforeunload / pagehide 承担，故此处不再断言窗口关闭回调。
 assert.match(
   appSource,
   /window\.addEventListener\('pagehide', handleBeforeUnload\)/,

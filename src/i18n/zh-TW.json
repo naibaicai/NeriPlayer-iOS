@@ -992,11 +992,6 @@
     "clear_confirm_btn": "確定清空"
   },
   "settings": {
-    "audio_output": "音訊輸出裝置",
-    "audio_output_default": "跟隨系統預設裝置",
-    "audio_output_desc": "切換裝置時保留播放位置；預設選項自動跟隨系統變更",
-    "audio_output_unavailable": "{name}（未連接）",
-    "audio_output_failed": "無法切換音訊輸出裝置",
     "title": "設定",
     "accounts": "帳號",
     "nav_accounts_desc": "管理平台登入與授權狀態",
@@ -1363,9 +1358,6 @@
     "ffmpeg_component_unavailable": "未能載入，Opus、E-AC-3 等格式暫時無法播放",
     "network": "網路",
     "nav_network_desc": "配置網路連線",
-    "bypass_proxy": "繞過代理",
-    "bypass_proxy_desc": "繞過系統代理直接連線，適用於代理導致的連線問題",
-    "bypass_proxy_failed": "代理模式切換失敗，已恢復原設定",
     "download_manage": "下載管理",
     "download_progress": "已完成 {completed}/{total}",
     "cancel_all_downloads": "取消全部",

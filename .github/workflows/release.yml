@@ -142,7 +142,7 @@ jobs:
           const cargoLock = fs.readFileSync('src-tauri/Cargo.lock', 'utf8')
           const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1]
           const lockPackage = cargoLock.match(
-            /\[\[package\]\]\s+name = "neri-player-desktop"\s+version = "([^"]+)"/m,
+            /\[\[package\]\]\s+name = "neri-player-ios"\s+version = "([^"]+)"/m,
           )?.[1]
           const expectedTag = `v${packageJson.version}`
 

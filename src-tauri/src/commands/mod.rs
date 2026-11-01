@@ -2,6 +2,7 @@ pub mod auth_cmd;
 pub mod cache_cmd;
 pub mod comment_cmd;
 pub mod debug_cmd;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod desktop_lyrics_cmd;
 pub mod download_cmd;
 pub mod explore_cmd;
@@ -18,5 +19,6 @@ pub mod settings_cmd;
 pub mod stats_cmd;
 pub mod storage_cmd;
 pub mod sync_cmd;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod tray_cmd;
 pub mod user_data_cmd;

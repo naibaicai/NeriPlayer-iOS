@@ -253,9 +253,10 @@ impl NeteaseClient {
         Self::with_transport(FallbackHttp::with_fallback(http, fallback, "netease"))
     }
 
-    fn anonymous_home_client(bypass_proxy: bool) -> AppResult<Self> {
-        // 克隆已有 Client 会共享 CookieProvider，因此匿名重试必须新建无 Jar 的传输通道
-        let build = |no_proxy| {
+    fn anonymous_home_client() -> AppResult<Self> {
+        // 克隆已有 Client 会共享 CookieProvider，因此匿名重试必须新建无 Jar 的传输通道。
+        // 主客户端直连、兜底客户端走系统代理，两种网络环境都能自愈
+        let build = |no_proxy: bool| {
             let mut builder = Client::builder()
                 .user_agent(USER_AGENT)
                 .connect_timeout(std::time::Duration::from_secs(10))
@@ -265,7 +266,7 @@ impl NeteaseClient {
             }
             builder.build()
         };
-        Ok(Self::with_fallback(&build(bypass_proxy)?, &build(!bypass_proxy)?))
+        Ok(Self::with_fallback(&build(true)?, &build(false)?))
     }
 
     async fn fetch_home_request(&self, request: &HomeSectionRequest) -> AppResult<Value> {
@@ -284,7 +285,7 @@ impl NeteaseClient {
         parse_json_response(response, "netease home api").await
     }
 
-    pub async fn get_home_section(&self, source: &str, bypass_proxy: bool) -> AppResult<Value> {
+    pub async fn get_home_section(&self, source: &str) -> AppResult<Value> {
         let request = home_section_request(source)?;
         let logged_in = self.has_login();
         if request.requires_login && !logged_in {
@@ -310,7 +311,7 @@ impl NeteaseClient {
             HomeSectionKind::Raw => {
                 let mut body = self.fetch_home_request(&request).await?;
                 if should_retry_home_anonymously(source, logged_in, &body) {
-                    body = Self::anonymous_home_client(bypass_proxy)?
+                    body = Self::anonymous_home_client()?
                         .fetch_home_request(&request).await?;
                 }
                 // 前端按 Android 规则过滤有效条目后再取 30，保留原始数组避免提前截掉有效项
@@ -412,6 +413,9 @@ impl NeteaseClient {
     }
 
     /// WEAPI POST 公共实现；`idempotent` 决定传输层是否允许超时重试
+    ///
+    /// 写接口要求「加密体里的 csrf_token」与「query 里的 csrf_token」是同一个值，
+    /// 因此 csrf 统一在这里求值并统一注入，调用方不再各自提前取值。
     async fn weapi_request(&self, url: &str, params: &Value, idempotent: bool) -> AppResult<Value> {
         if self.has_login() && self.csrf_token().is_empty() {
             self.ensure_weapi_session().await;
@@ -421,9 +425,18 @@ impl NeteaseClient {
                 ));
             }
         }
-        let json_str = serde_json::to_string(params)?;
-        let (encrypted_params, enc_sec_key) = crypto::weapi_encrypt(&json_str);
+        // 预热可能刚刚换掉 __csrf，必须在预热之后取值，并写回加密体
         let csrf = self.csrf_token();
+        let payload = match params.get("csrf_token") {
+            Some(_) => {
+                let mut owned = params.clone();
+                owned["csrf_token"] = Value::String(csrf.clone());
+                owned
+            }
+            None => params.clone(),
+        };
+        let json_str = serde_json::to_string(&payload)?;
+        let (encrypted_params, enc_sec_key) = crypto::weapi_encrypt(&json_str);
 
         let build = |client: &Client| {
             client
@@ -468,7 +481,11 @@ impl NeteaseClient {
         });
         let body = self.weapi_post(&format!("{}/weapi/cloudsearch/get/web", BASE_URL), &params).await?;
         match json_i64(&body["code"]) {
-            Some(200) | None => Ok(body),
+            Some(200) => Ok(body),
+            // 缺 code 不能当成功：异常响应放行会让上层解析出空结果
+            None => Err(AppError::Api(
+                "netease cloudsearch response missing code".into(),
+            )),
             Some(code) => Err(AppError::Api(format!("netease search code {code}"))),
         }
     }
@@ -539,11 +556,12 @@ impl NeteaseClient {
         reply_to: Option<u64>,
         check_token: &str,
     ) -> AppResult<Value> {
+        // csrf_token 由 weapi_request 在预热之后统一注入，这里只占位
         let mut params = json!({
             "threadId": format!("R_SO_4_{song_id}"),
             "content": content,
             "checkToken": check_token,
-            "csrf_token": self.csrf_token(),
+            "csrf_token": "",
         });
         let path = match reply_to {
             Some(comment_id) => {
@@ -568,7 +586,7 @@ impl NeteaseClient {
             "commentId": comment_id.to_string(),
             "like": liked,
             "checkToken": check_token,
-            "csrf_token": self.csrf_token(),
+            "csrf_token": "",
         });
         let action = if liked { "like" } else { "unlike" };
         self.weapi_post_write(&format!("{BASE_URL}/weapi/v1/comment/{action}"), &params).await
@@ -589,8 +607,21 @@ impl NeteaseClient {
             &params,
         ).await?;
 
-        let songs = body["result"]["songs"].as_array()
-            .ok_or_else(|| AppError::Api("No search results".into()))?;
+        // 先看业务码：301/302/50000005 是登录过期/风控，不能当成「没有结果」
+        match json_i64(&body["code"]) {
+            Some(200) | None => {}
+            Some(301) | Some(302) => {
+                return Err(AppError::Api(
+                    "NetEase login expired or risk-controlled (code 301/302)".into(),
+                ))
+            }
+            Some(code) => return Err(AppError::Api(format!("netease search code {code}"))),
+        }
+
+        // 业务码正常但结果为空，才是真正的「无结果」
+        let Some(songs) = body["result"]["songs"].as_array() else {
+            return Ok(Vec::new());
+        };
 
         let results = songs.iter().filter_map(|s| {
             Some(NeteaseSearchResult {
@@ -1421,7 +1452,7 @@ mod home_section_tests {
         for body in [json!({"code":200}), json!({"code":500}), json!({})] {
             assert!(!should_retry_home_anonymously("personalized", true, &body));
         }
-        let anonymous = NeteaseClient::anonymous_home_client(true).unwrap();
+        let anonymous = NeteaseClient::anonymous_home_client().unwrap();
         assert!(!anonymous.has_login());
         assert!(anonymous.csrf_token().is_empty());
         assert!(anonymous.cookie_jar.is_none());
@@ -1429,9 +1460,9 @@ mod home_section_tests {
 
     #[tokio::test]
     async fn login_required_sources_and_unknown_sources_fail_before_network() {
-        let client = NeteaseClient::anonymous_home_client(true).unwrap();
+        let client = NeteaseClient::anonymous_home_client().unwrap();
         for source in ["daily_recommend", "private_fm", "daily_resource", "unknown"] {
-            assert!(client.get_home_section(source, true).await.is_err());
+            assert!(client.get_home_section(source).await.is_err());
         }
     }
 
@@ -1466,7 +1497,7 @@ mod home_section_tests {
             String::from_utf8(request).unwrap()
         });
 
-        let anonymous = NeteaseClient::anonymous_home_client(true).unwrap();
+        let anonymous = NeteaseClient::anonymous_home_client().unwrap();
         anonymous.http.primary().get(local_url.clone()).send().await.unwrap().text().await.unwrap();
         let request = server.join().unwrap();
         assert!(!request.to_ascii_lowercase().contains("\r\ncookie:"));

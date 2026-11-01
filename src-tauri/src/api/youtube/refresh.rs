@@ -179,13 +179,14 @@ pub fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn build_cookie_header(auth: &YouTubeAuth) -> String {
-    auth.cookies
-        .iter()
-        .filter(|cookie| !cookie.name.is_empty() && !cookie.value.is_empty())
-        .map(|cookie| format!("{}={}", cookie.name, cookie.value))
-        .collect::<Vec<_>>()
-        .join("; ")
+/// 按目标域名构造 Cookie 头
+///
+/// `.youtube.com` 与 `.google.com` 下会有同名 Cookie（SID/HSID/SAPISID 等），
+/// 混在一个头里服务端只认其中一个，可能取到「另一域」那份而变成游客态。
+/// 因此必须按 host 逐域过滤，复用 account 里已有的实现。
+fn build_cookie_header_for_host(auth: &YouTubeAuth, host: &str) -> String {
+    let values = super::account::select_cookie_values(&auth.cookies, host);
+    super::account::build_cookie_header(&values)
 }
 
 fn build_rotation_cookie_header(auth: &YouTubeAuth) -> String {
@@ -368,14 +369,19 @@ pub async fn refresh_youtube_session(
     if !auth.has_login() {
         return Ok(None);
     }
-    let cookie_header = build_cookie_header(auth);
-
     let mut observed = Vec::new();
     let mut saw_logged_in = false;
     let mut saw_guest = false;
     let mut network_ok = false;
 
     for url in [MUSIC_HOME_URL, WWW_REFRESH_URL] {
+        // 每个目标域单独构造 Cookie 头，避免同名 Cookie 跨域冲突导致误判游客态
+        let host = url
+            .split("://")
+            .nth(1)
+            .and_then(|rest| rest.split('/').next())
+            .unwrap_or("youtube.com");
+        let cookie_header = build_cookie_header_for_host(auth, host);
         match fetch_with_cookies(http, url, &cookie_header).await {
             Ok((set_cookie, body)) => {
                 network_ok = true;

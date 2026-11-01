@@ -76,7 +76,7 @@ async function runtime(options = {}) {
       return operation()
     }, updateCurrentTrackInfo() {} }) },
     '@/utils/logger': { createLogger: () => ({ error() {}, warn() {} }) },
-    '@/modules/shortcuts/platform': { isMacPlatform: false },
+    '@/modules/platform': { isMacPlatform: false },
   })
   pinia.setActivePinia(pinia.createPinia())
   return { store: module.useLibraryStore(), calls, events, storage, backend, module }

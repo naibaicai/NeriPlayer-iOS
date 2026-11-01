@@ -397,7 +397,6 @@ impl AndroidTypedSettings {
             match key.as_str() {
                 "dev_mode_enabled" => settings.dev_mode_enabled = *value,
                 "internationalization_enabled" => settings.internationalization_enabled = *value,
-                "bypass_proxy" => settings.bypass_proxy = *value,
                 // Android 的 dynamic_color = Material You 跟随系统取色，
                 // 语义与桌面旧 dynamic_color（跟随封面）不同，直接映射 color_mode
                 "dynamic_color" => {
@@ -1966,7 +1965,6 @@ pub async fn import_config(app: AppHandle, state: State<'_, AppState>) -> AppRes
         settings.lt_share_audio_links = listen_together.share_audio_links;
     }
     let settings = store::save_settings(&app, settings)?;
-    state.rebuild_http(settings.bypass_proxy);
 
     if let Some(imported_auth) = imported.auth {
         let mut auth = state.auth.lock();
@@ -2743,7 +2741,7 @@ mod tests {
     fn android_settings_apply_maps_known_keys_only() {
         use super::AndroidTypedSettings;
         let android = AndroidTypedSettings {
-            booleans: [("bypass_proxy".into(), true), ("usb_exclusive_playback".into(), true)]
+            booleans: [("dev_mode_enabled".into(), true), ("usb_exclusive_playback".into(), true)]
                 .into_iter()
                 .collect(),
             floats: [("lyric_font_scale".into(), 1.25)].into_iter().collect(),
@@ -2764,7 +2762,7 @@ mod tests {
         let mut settings = AppSettings::default();
         android.apply_to(&mut settings);
 
-        assert!(settings.bypass_proxy);
+        assert!(settings.dev_mode_enabled);
         assert!((settings.lyric_font_scale - 1.25).abs() < f32::EPSILON);
         assert_eq!(settings.cloud_music_offset, 250);
         assert_eq!(settings.max_cache_size, 10_240);
@@ -2809,7 +2807,7 @@ mod tests {
             "kind": "moe.ouom.neriplayer.config",
             "formatVersion": 1,
             "exportedAt": 1787906559291,
-            "settings": { "booleans": { "bypass_proxy": true }, "floats": {}, "ints": {}, "longs": {}, "strings": {} },
+            "settings": { "booleans": { "dev_mode_enabled": true }, "floats": {}, "ints": {}, "longs": {}, "strings": {} },
             "listenTogether": { "workerBaseUrl": "https://lt.example", "userUuid": "abc", "nickname": "me" },
             "language": { "code": "zh" },
             "neteaseAuth": { "cookies": { "MUSIC_U": "v1", "__csrf": "" }, "savedAt": 1 },

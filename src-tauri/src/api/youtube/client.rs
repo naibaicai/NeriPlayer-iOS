@@ -304,7 +304,15 @@ impl YouTubeClient {
                 .await
             {
                 Ok(value) => value,
-                Err(_) => {
+                Err(error) => {
+                    // 分页中断不能静默：记录原因并打上截断标记，供上层提示用户
+                    log::warn!(
+                        target: "youtube-library",
+                        "library continuation page {} failed: {error}",
+                        pages.len() + 1
+                    );
+                    data["_neriContinuationTruncated"] = json!(true);
+                    data["_neriContinuationError"] = json!(error.to_string());
                     break;
                 }
             };
@@ -421,9 +429,14 @@ impl YouTubeClient {
                 return Ok(artists);
             };
             if !seen_tokens.insert(token.clone()) {
-                return Err(AppError::Api(
-                    "YouTube followed artists continuation repeated".into(),
-                ));
+                // 重复 token 只说明这一页没有新数据，不是致命错误：
+                // 与 fetch_playlist_detail_pages 保持一致，返回已收集结果。
+                log::warn!(
+                    target: "youtube-artists",
+                    "followed artists continuation repeated, returning {} collected",
+                    artists.len()
+                );
+                return Ok(artists);
             }
             continuation = Some(token);
         }

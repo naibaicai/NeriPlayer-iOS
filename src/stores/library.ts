@@ -5,7 +5,7 @@ import { listen } from '@tauri-apps/api/event'
 import { usePlayerStore, type TrackInfo } from './player'
 import { useSettingsStore } from './settings'
 import { createLogger } from '@/utils/logger'
-import { isMacPlatform } from '@/modules/shortcuts/platform'
+import { isMacPlatform } from '@/modules/platform'
 
 const log = createLogger('library')
 const LEGACY_SCAN_DIR_KEY = 'neri:last_scan_dir'

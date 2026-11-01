@@ -2,8 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import CustomSelect from '@/components/ui/CustomSelect.vue'
-import { DESKTOP_LYRICS_FONT_PRESETS, sanitizeFontFamily } from '@/modules/desktopLyrics/style'
-import { fontFamilyStack } from '@/modules/settings/fonts'
+import { FONT_FAMILY_PRESETS, fontFamilyStack, sanitizeFontFamily } from '@/modules/settings/fonts'
 
 const props = withDefaults(defineProps<{
   modelValue: string
@@ -15,12 +14,12 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 const { t } = useI18n()
 const CUSTOM_FONT = '__custom__'
 const customMode = ref(false)
-const isPreset = (value: string) => (DESKTOP_LYRICS_FONT_PRESETS as readonly string[]).includes(value)
+const isPreset = (value: string) => (FONT_FAMILY_PRESETS as readonly string[]).includes(value)
 const choice = computed(() => customMode.value || (props.modelValue && !isPreset(props.modelValue))
   ? CUSTOM_FONT : props.modelValue)
 const options = computed(() => [
   { value: '', label: t('settings.font_default') },
-  ...DESKTOP_LYRICS_FONT_PRESETS.map(font => ({ value: font, label: font })),
+  ...FONT_FAMILY_PRESETS.map(font => ({ value: font, label: font })),
   { value: CUSTOM_FONT, label: t('settings.font_custom') },
 ])
 

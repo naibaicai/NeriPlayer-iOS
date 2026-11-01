@@ -9,7 +9,7 @@ pub async fn get_netease_home_section(
     source: String,
     state: State<'_, AppState>,
 ) -> AppResult<Value> {
-    state.netease().get_home_section(&source, state.bypasses_system_proxy()).await
+    state.netease().get_home_section(&source).await
 }
 
 /// 获取网易云个性化推荐歌单（需登录）

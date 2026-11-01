@@ -11,6 +11,20 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/* 手机竖屏：28px 侧边距会把列表挤成窄条，两侧露出大片空白 */
+@media (max-width: 640px) {
+  .detail-view {
+    padding: 12px 16px 20px;
+  }
+}
+
+/* 横屏手机：高度只有 ~390px，纵向留白必须收紧，否则首屏只看得到封面 */
+@media (orientation: landscape) and (max-height: 500px) {
+  .detail-view {
+    padding: 8px 16px 16px;
+  }
+}
+
 .detail-header {
   /* 常驻：返回与搜索是详情页的主要导航，滚走了就得先滚回顶部才能搜 */
   position: sticky;
@@ -237,6 +251,43 @@
   gap: 2px;
   background: var(--md-surface);
   min-height: 0;
+  /* 列表整体淡入：加载完成时不至于“凭空出现” */
+  animation: track-list-in var(--duration-medium) var(--ease-decelerate) both;
+}
+
+@keyframes track-list-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 前 12 项轻微错开，之后的条目不再叠延迟（963 首的列表不能逐项动） */
+.track-item:nth-child(-n+12) {
+  animation: track-item-in 220ms var(--ease-decelerate) both;
+}
+.track-item:nth-child(1) { animation-delay: 0ms; }
+.track-item:nth-child(2) { animation-delay: 14ms; }
+.track-item:nth-child(3) { animation-delay: 28ms; }
+.track-item:nth-child(4) { animation-delay: 42ms; }
+.track-item:nth-child(5) { animation-delay: 56ms; }
+.track-item:nth-child(6) { animation-delay: 70ms; }
+.track-item:nth-child(7) { animation-delay: 84ms; }
+.track-item:nth-child(8) { animation-delay: 98ms; }
+.track-item:nth-child(9) { animation-delay: 112ms; }
+.track-item:nth-child(10) { animation-delay: 126ms; }
+.track-item:nth-child(11) { animation-delay: 140ms; }
+.track-item:nth-child(12) { animation-delay: 154ms; }
+
+@keyframes track-item-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 系统开启“减弱动态效果”时不要位移，只保留极短淡入 */
+@media (prefers-reduced-motion: reduce) {
+  .track-list,
+  .track-item:nth-child(-n+12) {
+    animation: none;
+  }
 }
 
 .track-item {
@@ -251,13 +302,16 @@
   contain-intrinsic-size: 56px;
   contain: layout style paint;
   background: var(--md-surface);
-  transition: background 120ms ease;
+  /* 长列表逐项入场会过重，只给交互态做轻量过渡 */
+  transition: background 120ms ease, transform 120ms ease, box-shadow 120ms ease;
 
   &:hover,
   &.active {
     border-radius: var(--radius-md);
   }
   &:hover { background: var(--md-surface-container); }
+  /* 触屏没有 hover，按压反馈是唯一的“点中了”信号 */
+  &:active { transform: scale(0.995); background: var(--md-surface-container); }
   &.active { background: color-mix(in srgb, var(--md-primary) 8%, transparent); }
   &.active .track-title { color: var(--md-primary); }
 }
@@ -400,11 +454,12 @@
   align-items: center;
   justify-content: center;
   color: var(--md-on-surface-variant);
-  opacity: 0;
+  /* 常显：隐藏态会让用户以为整行不可点，触屏也没有 hover 可言 */
+  opacity: 0.55;
   transition: opacity var(--duration-short), background var(--duration-short), color var(--duration-short);
   flex-shrink: 0;
 
-  .track-item:hover & { opacity: 0.6; }
+  .track-item:hover & { opacity: 0.8; }
   &:hover { opacity: 1 !important; background: var(--md-surface-container-high); }
   .material-symbols-rounded { font-size: 18px; }
 }
@@ -456,4 +511,49 @@
     opacity: 0.45;
   }
   &:disabled:hover { background: transparent; }
+}
+
+/* ── 竖屏 / 窄屏 / 手机横屏：详情页改为上下排 ───────────────────────────
+   402pt 宽下「180px 封面 + 24px 间距 + 信息区」只剩约 150px，
+   「全部播放」被压成一字一行、标题断成两截。改为封面居上、信息区占满整宽。
+   横屏手机高度只有 ~390px，同样需要压缩封面，否则首屏只剩一张图。 */
+@media (max-width: 640px), (orientation: landscape) and (max-height: 500px) {
+  .detail-hero {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  .hero-cover {
+    width: min(46vw, 180px);
+    height: min(46vw, 180px);
+    margin: 0 auto;
+  }
+
+  .hero-info {
+    text-align: center;
+    align-items: center;
+  }
+
+  .hero-title {
+    font-size: 19px;
+    line-height: 1.35;
+    word-break: break-word;
+  }
+
+  .hero-desc {
+    text-align: left;
+  }
+
+  .hero-actions {
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  /* 不许再被压成竖排单字 */
+  .hero-actions .play-all-btn {
+    white-space: nowrap;
+    flex: 0 0 auto;
+  }
 }
