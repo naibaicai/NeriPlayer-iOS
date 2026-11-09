@@ -173,6 +173,81 @@ jobs:
     with:
       ref: ${{ needs.validate.outputs.target_sha }}
 
+  ios-build:
+    name: Build iOS (Unsigned)
+    runs-on: macos-15
+    timeout-minutes: 60
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.target_sha }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Init and Build iOS (Unsigned)
+        run: |
+          # 1. 初始化 Tauri iOS 工程
+          pnpm tauri ios init --ci || true
+          
+          # 2. 进入生成的 Xcode 工程目录
+          cd src-tauri/gen/apple
+          
+          # 3. 使用 xcodebuild 编译，并显式禁用所有签名要求
+          # 查找生成的 .xcodeproj 文件
+          PROJECT=$(find . -name "*.xcodeproj" -maxdepth 1 | head -n 1)
+          
+          xcodebuild -project "$PROJECT" \
+            -scheme "$(basename "$PROJECT" .xcodeproj)" \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package Unsigned IPA
+        run: |
+          mkdir -p Payload
+          # 找到编译出来的 .app 文件
+          APP_PATH=$(find src-tauri/gen/apple/build -name "*.app" -path "*iphoneos*" | head -n 1)
+          
+          # 如果上面的路径没找到，尝试备用路径
+          if [ -z "$APP_PATH" ]; then
+            APP_PATH=$(find src-tauri/gen/apple -name "*.app" -path "*iphoneos*" | head -n 1)
+          fi
+          
+          echo "Found app at: $APP_PATH"
+          cp -R "$APP_PATH" Payload/
+          
+          # 压缩为 ipa
+          zip -r NeriPlayer-unsigned.ipa Payload/
+
+      - name: Upload Unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeriPlayer-iOS-Unsigned
+          path: NeriPlayer-unsigned.ipa
   build:
     name: Build (${{ matrix.artifact_name }})
     needs: [validate, ffmpeg]
